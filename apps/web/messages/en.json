@@ -1,0 +1,66 @@
+{
+  "appName": "Gaps",
+  "appSubtitle": "Adaptive Maths Learning Harness (V0.1 — Phase 0 Scaffold)",
+  "tagline": "Find what you do not yet understand, practise one helpful step at a time, and see real progress.",
+  "phaseBanner": {
+    "badge": "Phase 0 · Scaffold",
+    "title": "System foundation & design tokens",
+    "description": "This shell verifies the Next.js App Router runtime, PostgreSQL health probe, §23 visual tokens, and safe AI-off defaults. Learning workflows, content templates, and login flows arrive in Phases 1–8."
+  },
+  "health": {
+    "title": "System readiness",
+    "endpointLabel": "GET /api/v1/health",
+    "refreshButton": "Check health",
+    "checking": "Checking…",
+    "statusLabels": {
+      "ok": "Healthy",
+      "degraded": "Degraded (database offline)",
+      "error": "Unreachable"
+    },
+    "fields": {
+      "status": "App status",
+      "db": "PostgreSQL 16",
+      "llm": "AI provider",
+      "version": "Build version"
+    }
+  },
+  "tokens": {
+    "title": "Design tokens & GapMap states",
+    "description": "Every state pairs colour with a distinct icon and supportive label. Unassessed concepts stay neutral grey, never negative.",
+    "states": [
+      {
+        "key": "not_assessed",
+        "label": "Not explored yet",
+        "detail": "Neutral dashed state before evidence exists"
+      },
+      {
+        "key": "needs_support",
+        "label": "Let's work on this",
+        "detail": "Amber highlight when guided support helps"
+      },
+      {
+        "key": "developing",
+        "label": "Getting there",
+        "detail": "Light blue progress while building fluency"
+      },
+      {
+        "key": "demonstrated",
+        "label": "You can do this",
+        "detail": "Primary blue once verified independently"
+      },
+      {
+        "key": "retained",
+        "label": "Locked in",
+        "detail": "Teal with a star after 7-day retention"
+      }
+    ]
+  },
+  "guardrails": {
+    "title": "Active V0.1 safety posture",
+    "items": [
+      "AI defaults to LLM_PROVIDER=disabled and AI_ZDR_CONFIRMED=false",
+      "No personal data leaves the server or enters structured logs",
+      "No placeholder mastery claims or unreviewed content served"
+    ]
+  }
+}

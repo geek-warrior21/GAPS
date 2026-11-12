@@ -1,0 +1,13 @@
+node_modules
+.next
+dist
+coverage
+pnpm-lock.yaml
+next-env.d.ts
+README.md
+docs/SPEC.md
+GAPS_V0.1_SPEC.md
+AGENTS.md
+CLAUDE.md
+*.docx
+

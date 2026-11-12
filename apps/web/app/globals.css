@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #152743;
+  --text: #212e3e;
+  --muted: #5b6c80;
+  --primary: #285bad;
+  --primary-ink: #18375a;
+  --teal: #248c7f;
+  --accent: #f2a93b;
+  --surface: #ffffff;
+  --surface-2: #f2f6fb;
+  --line: #d5dfea;
+
+  --gap-not-assessed: #a9b4c2;
+  --gap-needs-support: #f2a93b;
+  --gap-developing: #8db8f0;
+  --gap-demonstrated: #285bad;
+  --gap-retained: #248c7f;
+
+  --radius-card: 16px;
+  --radius-control: 12px;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-teal: var(--teal);
+  --color-accent: var(--accent);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --font-sans: "Nunito", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+html {
+  font-size: 17px;
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--surface-2);
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
