@@ -59,3 +59,56 @@
   - Phase 6 onward: mobile and desktop Playwright checks become mandatory.
   - Add meaningful tests alongside earlier functionality when applicable; unimplemented checks remain explicitly unavailable (exit non-zero, never fake passes); no safety invariant or final release requirement is waived.
 - **Phase 0 closed and committed** as `"phase 0: scaffold"` prior to Phase 1.
+
+---
+
+## Phase 1: Domain Core (`2026-11-12`)
+
+### 1. Built
+
+- **`packages/domain/src/` (pure deterministic TypeScript, zero Node/browser I/O):**
+  - `types.ts`: Canonical frozen constants (`POLICY_VERSION = "rules-1.0"`, `VERIFIER_VERSION = "verify-1.0"`), all 14 `CONCEPT_IDS`, 15 `MISCONCEPTION_IDS`, 12 `TEACHING_ACTIONS`, `Rational`, `RichText`, `VisualSpec`, `AnswerSpec`, `Parsed`, `CheckedAttempt`, `Belief`, `DecisionContext`, and `DecisionResult` (matching SPEC §8, §9, §19, §20, §22, Appendix A).
+  - `rng.ts` & `ids.ts`: Deterministic Mulberry32 PRNG (`createRng`), FNV-1a string seeder (`hashStringToSeed`), and pure Crockford Base32 prefixed ULID generator/validator (`makeUlid`, `makeId`, `isValidPrefixedId`) for all 12 prefixes (`usr_`, `stu_`, `coh_`, `ses_`, `att_`, `evt_`, `dec_`, `itm_`, `qst_`, `bos_`, `slv_`, `flg_`).
+  - `rational.ts`: Exact BigInt reduced `Rational` (`d > 0`, `gcd(|n|, d) === 1`), `gcd`, `lcm`, `add`, `sub`, `mul`, `div`, `neg`, `abs`, `cmp`, `eq`, `isInteger`, `toMixed`, `fromDecimalString`, and `format`.
+  - `parse.ts`: SPEC §19.1 Unicode normalization (`−`→`-`, `÷`/`⁄`→`/`, whitespace collapse, single trailing period trim) and strict grammar parser (`integer`, `fraction`, `mixed`, `decimal`, `comparison`, `choice`, `order`), returning `null` for malformed/over-long/division-by-zero inputs.
+  - `misconceptions.ts` & `verify.ts`: Full 15-entry misconception catalog (`MC-*`), exact single-match / zero-on-ambiguity matcher (`matchMisconception`), and `verify` across all `AnswerSpec` kinds × rational forms (`any`, `simplest`, `mixed`, `improper`), `not_simplified`, and `formatMismatch`.
+  - `belief.ts`: Pure replayable `beliefReducer`, `replayBeliefs`, `createInitialBeliefState`, `toPublicBelief`, and read-time staleness (`computeEffectiveReliability`), enforcing `unparseable`/`not_simplified` non-evidence, `assisted > 0` non-promotion (`I2`), 6d23h vs 7d retention boundary, review scheduling (`+2d` warmup, `+7d` retention, `+1d` retry), and demotion/cancellation.
+  - `policy/l1.ts`, `quickcheck.ts`, `policy/l2.ts`: Topological 14-concept strand DAG, `GRADE_ENTRY` (`6→PART`, `7→EQUIV`, `8→ADDUNLIKE`), `focusConcept`, 5-item Quick Check traversal, Learn session review-first opener, `targetDifficulty`, `selectTemplate`, `drawFreshSeed`, deterministic IST `(studentId, istDate)` Daily Quest (3–5 items), Boss Battle unlock (`ceil(n/2)`), 8-item weighted Boss composer, and `evaluateBossBattle` (`>= 6/8`).
+  - `policy/l3.ts`: Deterministic `decideNextAction` (`R1_HINT_REQUESTED`–`R14_KEEP_GOING` + `R0_DEFAULT`) and `guardDecision` enforcing `allowedActions`, hint rungs, difficulty bounds, and `reviewDue` preconditions.
+  - `sparks.ts` & `comeback.ts`: Idempotent Sparks calculator (`+10`/`+5`/`+30`/`+50`/`+20`/`+10`/`+40`, daily cap `300`, milestones `[100, 250, 500, 1000, 2000]`), UTC→IST (`UTC+05:30`) date conversion, Mon–Sun weekly rhythm, and `buildComebackCard` (`>= 24h` eligibility, factual attempt citations).
+- **`packages/contracts/src/`:**
+  - `domain.ts`, `step.ts`, `domain.test.ts`, re-exported from `index.ts`: Zod v4 schemas mirroring `Belief`, `CheckedAttempt`, `DecisionContext`, `DecisionResult`, `RichText`, `VisualSpec`, `Step`, and `.strict()` `ItemViewSchema` rejecting leaked `answer`/`seed`/`misconceptions` (`I9`).
+- **Tooling / Test Harness:**
+  - Added `fast-check@4.10.2` (root `devDependency`) for `Rational` property tests.
+  - Configured `thresholds: { lines: 90 }` in `vitest.config.ts`.
+
+### 2. Checks & Results
+
+- **Domain Purity Scan (`packages/domain/src`):** zero `node:*`, `fs`, `path`, `http`, `https`, `net`, `child_process`, `crypto`, `os`, or `process` imports (`PURE_DOMAIN_OK`).
+- **`pnpm verify` (under Node `v22.23.5`):** exit `0`:
+  - `pnpm typecheck`: 6/6 workspace packages passed.
+  - `pnpm lint`: 0 errors, 0 warnings.
+  - `pnpm format:check`: passed.
+  - `pnpm test` (`vitest run`): **23 test files, 135 tests passed**, including:
+    - `rational.test.ts`: field laws, invariants, ordering (`fast-check`), `toMixed`, `fromDecimalString`, `format`.
+    - `parse.test.ts`: 60+ table-driven cases across integers, fractions, mixed numbers, decimals, comparisons, order lists, choice IDs, Unicode normalization, and malformed inputs.
+    - `verify.test.ts` & `misconceptions.test.ts`: all `AnswerSpec` kinds × forms, `formatMismatch`, single vs ambiguous misconception suppression.
+    - `belief.test.ts`: all §9 transitions, `6d23h` vs `7d` retention, assisted non-promotion (`I2`), demotion + review cancellation, 30d staleness, deterministic out-of-order replay.
+    - `policy/l1.test.ts`, `quickcheck.test.ts`, `policy/l2.test.ts`, `sparks.test.ts`, `comeback.test.ts`.
+    - `policy/l3.golden.test.ts`: **40 golden decision scenarios (`G01`–`G40`) passed**, explicitly marked `educatorReviewStatus: "pending"`.
+  - `pnpm build`: Next.js 16.4.6 Turbopack standalone build passed.
+- **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **96.29% lines** (`96.48%` statements, `89.17%` branches, `98.4%` functions), exceeding the `>= 90%` threshold across every module.
+- **PostgreSQL 16 + Live Health Check:** `pnpm db:up` (`gaps-postgres` healthy) + `pnpm --filter @gaps/web start -p 3102` -> `GET /api/v1/health` returned **HTTP 200** `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+- **Unimplemented Phase Gates (kept non-zero):** `pnpm content:check` (Phase 2), `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:reset` (Phase 3), `pnpm test:e2e` (Phase 6).
+
+### 3. Assumptions, Conflicts & Decisions Requiring Review
+
+- **`Belief` vs `BeliefState`:** Appendix A `Belief` omits internal attempt history and `lastEvidenceAt`, whereas §19.4 reduces over `b.history` and computes read-time 30-day staleness. Implemented `Belief` strictly matching Appendix A and extended it internally as `BeliefState` (`history`, `lastEvidenceAt`, `lastEffects`) with `toPublicBelief()` stripping internal history cleanly.
+- **`orderList` comma spacing:** §19.1 grammar specifies `fraction ("," fraction){1,5}`; accepted optional whitespace after `,` so `"1/4, 2/4, 3/4"` parses alongside `"1/4,2/4,3/4"`.
+- **Direct `SPEC` L3 wording for `R4_NOT_SIMPLIFIED` & `R11_SECOND_MISS`:** `R4_NOT_SIMPLIFIED` maps to `ASK_CLARIFICATION` with `params: { askSimplify: true }` (per §19.2 / §25 `G09` no-evidence semantics); `R11_SECOND_MISS` emits primary action `WORKED_EXAMPLE` with L2 session engine serving `GUIDED_PRACTICE` after the worked example step is acknowledged.
+- **Pending Educator Review (no fabricated sign-off):** All 40 golden decision scenarios (`G01`–`G40` in `packages/domain/src/policy/l3.golden.test.ts`) are marked `educatorReviewStatus: "pending"` pending education-lead review.
+
+### 4. Follow-ups
+
+- Present `G01`–`G40` golden scenarios for education-lead sign-off alongside Phase 2 content review.
+- Proceed to Phase 2 (`packages/content` 14 concepts, ≥ 40 templates, explanations, `content:check`, `content:preview` CLI) when instructed.
