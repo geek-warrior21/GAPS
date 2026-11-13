@@ -345,16 +345,21 @@ export function evaluateBossBattle(
       `Boss battle cannot exceed ${BOSS_BATTLE_ITEM_COUNT} items, received ${outcomes.length}`,
     );
   }
-  if (options?.requireComplete && outcomes.length !== BOSS_BATTLE_ITEM_COUNT) {
+  const isResolved = (o: AttemptOutcome): boolean => o === "correct" || o === "incorrect";
+  const resolvedOutcomes = outcomes.filter(isResolved);
+  const resolvedCount = resolvedOutcomes.length;
+  const completed =
+    outcomes.length === BOSS_BATTLE_ITEM_COUNT && resolvedCount === BOSS_BATTLE_ITEM_COUNT;
+
+  if (options?.requireComplete && !completed) {
     throw new RangeError(
-      `Boss battle requires exactly ${BOSS_BATTLE_ITEM_COUNT} resolved items, received ${outcomes.length}`,
+      `Boss battle requires exactly ${BOSS_BATTLE_ITEM_COUNT} resolved items, received ${resolvedCount}`,
     );
   }
-  const score = outcomes.filter((o) => o === "correct").length;
-  const completed = outcomes.length === BOSS_BATTLE_ITEM_COUNT;
+  const score = resolvedOutcomes.filter((o) => o === "correct").length;
   return {
     score,
-    total: outcomes.length,
+    total: resolvedCount,
     completed,
     defeated: completed && score >= BOSS_BATTLE_PASS_SCORE,
   };

@@ -19,28 +19,51 @@ function clampDifficulty(value: number): 1 | 2 | 3 {
   return 2;
 }
 
-function selectFallbackAction(allowedActions: readonly TeachingAction[]): TeachingAction {
-  if (allowedActions.length === 0) {
-    throw new RangeError("Cannot authorize execution: allowedActions is empty");
-  }
-  if (allowedActions.includes("INDEPENDENT_PRACTICE")) {
-    return "INDEPENDENT_PRACTICE";
-  }
-  const fallback = allowedActions[0];
-  if (!fallback) {
-    throw new RangeError("Cannot authorize execution: allowedActions is empty");
-  }
-  return fallback;
-}
+function tryCreateFallback(
+  action: TeachingAction,
+  ctx: DecisionContext,
+  reasonCode: string,
+): DecisionResult | null {
+  let conceptId = ctx.focusConceptId;
+  let difficulty: 1 | 2 | 3 | undefined;
+  let route: string | undefined;
+  let hintRung: 1 | 2 | 3 | undefined;
+  let offerBreak: boolean | undefined;
 
-function buildFallback(ctx: DecisionContext, reasonCode = "R0_DEFAULT"): DecisionResult {
-  const selectedAction = selectFallbackAction(ctx.allowedActions);
+  if (action === "INDEPENDENT_PRACTICE" || action === "DIAGNOSE" || action === "GUIDED_PRACTICE") {
+    difficulty = 1;
+  } else if (action === "EXPLAIN") {
+    route = "everyday";
+  } else if (action === "VISUALIZE") {
+    route = "picture";
+  } else if (action === "REQUEST_REVIEW") {
+    difficulty = 1;
+    offerBreak = true;
+  } else if (action === "GIVE_HINT") {
+    hintRung = clampDifficulty(ctx.session.hintRungShown + 1) as 1 | 2 | 3;
+  } else if (action === "RETRIEVAL_REVIEW") {
+    if (!ctx.reviewDue || !ctx.dueReviewConceptId) {
+      return null;
+    }
+    conceptId = ctx.dueReviewConceptId;
+  } else if (action === "REVIEW_PREREQUISITE") {
+    const weakPrereq = findWeakPrerequisite(ctx.prerequisiteBeliefs);
+    if (!weakPrereq) {
+      return null;
+    }
+    conceptId = weakPrereq.conceptId;
+    difficulty = targetDifficulty(weakPrereq.status, 0);
+  }
+
   return {
     decisionId: ctx.decisionId,
-    selectedAction,
+    selectedAction: action,
     params: {
-      conceptId: ctx.focusConceptId,
-      ...(selectedAction === "INDEPENDENT_PRACTICE" ? { difficulty: 1 } : {}),
+      conceptId,
+      ...(difficulty !== undefined ? { difficulty } : {}),
+      ...(route !== undefined ? { route } : {}),
+      ...(hintRung !== undefined ? { hintRung } : {}),
+      ...(offerBreak !== undefined ? { offerBreak } : {}),
     },
     reasonCodes: [reasonCode],
     provider: "rules",
@@ -48,6 +71,21 @@ function buildFallback(ctx: DecisionContext, reasonCode = "R0_DEFAULT"): Decisio
     fallbackUsed: true,
     latencyMs: 0,
   };
+}
+
+function buildFallback(ctx: DecisionContext, reasonCode = "R0_DEFAULT"): DecisionResult {
+  if (ctx.allowedActions.length === 0) {
+    throw new RangeError("Cannot authorize execution: allowedActions is empty");
+  }
+  if (ctx.allowedActions.includes("INDEPENDENT_PRACTICE")) {
+    const res = tryCreateFallback("INDEPENDENT_PRACTICE", ctx, reasonCode);
+    if (res) return res;
+  }
+  for (const action of ctx.allowedActions) {
+    const res = tryCreateFallback(action, ctx, reasonCode);
+    if (res) return res;
+  }
+  throw new RangeError("Cannot authorize execution: no valid fallback action in allowedActions");
 }
 
 /**
@@ -81,13 +119,22 @@ export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): 
       break;
     }
     case "RETRIEVAL_REVIEW": {
-      if (!ctx.reviewDue) {
+      if (!ctx.reviewDue || !candidate.params.conceptId) {
+        return buildFallback(ctx, "R0_DEFAULT");
+      }
+      if (ctx.dueReviewConceptId && candidate.params.conceptId !== ctx.dueReviewConceptId) {
         return buildFallback(ctx, "R0_DEFAULT");
       }
       break;
     }
     case "REVIEW_PREREQUISITE": {
       if (!candidate.params.conceptId) {
+        return buildFallback(ctx, "R0_DEFAULT");
+      }
+      const isPrereq = ctx.prerequisiteBeliefs.some(
+        (b) => b.conceptId === candidate.params.conceptId,
+      );
+      if (!isPrereq) {
         return buildFallback(ctx, "R0_DEFAULT");
       }
       break;
@@ -106,6 +153,9 @@ export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): 
 export function decideNextAction(ctx: DecisionContext): DecisionResult {
   if (ctx.allowedActions.length === 0) {
     throw new RangeError("Cannot authorize execution: allowedActions is empty");
+  }
+  if (ctx.reviewDue && !ctx.dueReviewConceptId) {
+    throw new TypeError("dueReviewConceptId is required when reviewDue is true");
   }
 
   const { decisionId, focusConceptId, belief, prerequisiteBeliefs, lastAttempt, request, session } =
@@ -256,9 +306,11 @@ export function decideNextAction(ctx: DecisionContext): DecisionResult {
       ctx.justBecameDemonstrated === true || ctx.session.justBecameDemonstrated === true;
     if (justDemonstrated) {
       if (ctx.reviewDue) {
-        const targetConceptId = ctx.dueReviewConceptId ?? focusConceptId;
+        if (!ctx.dueReviewConceptId) {
+          throw new TypeError("dueReviewConceptId is required when reviewDue is true");
+        }
         return make("RETRIEVAL_REVIEW", "R13_DEMONSTRATED", {
-          conceptId: targetConceptId,
+          conceptId: ctx.dueReviewConceptId,
         });
       }
       return make("ADVANCE", "R13_DEMONSTRATED", {

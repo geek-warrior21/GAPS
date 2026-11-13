@@ -132,9 +132,4 @@ export {
   type SparkKind,
   type WeeklyRhythm,
 } from "./sparks";
-export {
-  COMEBACK_COPY_TEMPLATES,
-  buildComebackCard,
-  formatComebackMessage,
-  type ComebackCardData,
-} from "./comeback";
+export { buildComebackCard, type ComebackCardData } from "./comeback";

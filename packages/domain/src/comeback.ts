@@ -28,39 +28,13 @@ export interface ComebackCardData {
     readonly presentCorrect: number;
     readonly presentTotal: number;
   };
-  readonly message: string;
-}
-
-export const COMEBACK_COPY_TEMPLATES = {
-  singleDay:
-    "On {pastDate} you got {pastCorrect} of {pastTotal} {studentTitle} questions. Today you answered {presentCorrect} correctly on your own. That's a comeback!",
-  multiDay:
-    "On {pastDate} you got {pastCorrect} of {pastTotal} {studentTitle} questions. You answered {presentCorrect} correctly on your own. That's a comeback!",
-  retention:
-    "On {pastDate} you got {pastCorrect} of {pastTotal} {studentTitle} questions. You locked this in with a successful review. That's a comeback!",
-} as const;
-
-export function formatComebackMessage(card: ComebackCardData, template?: string): string {
-  const chosenTemplate =
-    template ??
-    (card.messageKey === "comeback.retention"
-      ? COMEBACK_COPY_TEMPLATES.retention
-      : card.messageKey === "comeback.multiDay"
-        ? COMEBACK_COPY_TEMPLATES.multiDay
-        : COMEBACK_COPY_TEMPLATES.singleDay);
-
-  return chosenTemplate
-    .replace("{pastDate}", card.copyParams.pastDate)
-    .replace("{pastCorrect}", String(card.copyParams.pastCorrect))
-    .replace("{pastTotal}", String(card.copyParams.pastTotal))
-    .replace("{studentTitle}", card.copyParams.studentTitle)
-    .replace("{presentCorrect}", String(card.copyParams.presentCorrect));
 }
 
 /**
  * Build a Comeback Card per SPEC §19.7 when a concept becomes demonstrated or retained
  * at least 24 hours after firstNeedsSupportAt.
- * Cites the stored evidence that established demonstration (okL4) and keeps copy in messages/en.json.
+ * Returns pure structured data citing the stored evidence that established demonstration (okL4).
+ * Copy templates live in apps/web/messages/en.json.
  */
 export function buildComebackCard(input: {
   readonly conceptId: ConceptId;
@@ -102,15 +76,16 @@ export function buildComebackCard(input: {
   const pastCorrect = pastDayAttempts.filter((a) => a.outcome === "correct").length;
   const pastTotal = pastDayAttempts.length;
 
-  const indEvidence = input.history.filter(
-    (a) =>
-      a.conceptId === input.conceptId &&
-      a.assistance === 0 &&
-      (a.outcome === "correct" || a.outcome === "incorrect") &&
-      Date.parse(a.at) <= achievedMs,
-  );
+  const indEvidence = input.history
+    .filter(
+      (a) =>
+        a.conceptId === input.conceptId &&
+        a.assistance === 0 &&
+        (a.outcome === "correct" || a.outcome === "incorrect") &&
+        Date.parse(a.at) <= achievedMs,
+    )
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
-  let demoCutoffMs = achievedMs;
   let retentionAttemptId: string | undefined;
 
   if (input.status === "retained") {
@@ -120,16 +95,35 @@ export function buildComebackCard(input: {
     if (reviewAttempt) {
       retentionAttemptId = reviewAttempt.attemptId;
     }
+  }
+
+  const demoCandidates = indEvidence.filter((a) => {
     if (input.demonstratedAt) {
-      demoCutoffMs = Date.parse(input.demonstratedAt);
-    } else if (reviewAttempt) {
-      demoCutoffMs = Date.parse(reviewAttempt.at) - 1;
+      return Date.parse(a.at) <= Date.parse(input.demonstratedAt);
+    }
+    if (input.status === "retained" && retentionAttemptId) {
+      return a.attemptId !== retentionAttemptId && Date.parse(a.at) < Date.parse(input.achievedAt);
+    }
+    return Date.parse(a.at) <= achievedMs;
+  });
+
+  // Find the earliest qualifying window of 4 attempts that established demonstration
+  let originalDemoL4: readonly CheckedAttempt[] | null = null;
+  let originalDemoOkL4: readonly CheckedAttempt[] | null = null;
+
+  for (let i = 3; i < demoCandidates.length; i++) {
+    const window = demoCandidates.slice(i - 3, i + 1);
+    const ok = window.filter((a) => a.outcome === "correct");
+    const distinctTemplates = new Set(ok.map((a) => a.templateId)).size;
+    if (ok.length >= 3 && distinctTemplates >= 2) {
+      originalDemoL4 = window;
+      originalDemoOkL4 = ok;
+      break;
     }
   }
 
-  const demoInd = indEvidence.filter((a) => Date.parse(a.at) <= demoCutoffMs);
-  const l4 = demoInd.slice(-4);
-  const okL4 = l4.filter((a) => a.outcome === "correct");
+  const l4 = originalDemoL4 ?? demoCandidates.slice(-4);
+  const okL4 = originalDemoOkL4 ?? l4.filter((a) => a.outcome === "correct");
   if (okL4.length < 3) {
     return null;
   }
@@ -139,8 +133,9 @@ export function buildComebackCard(input: {
   const presentTotal = l4.length;
 
   const presentDates = new Set(okL4.map((a) => toIstDateString(a.at)));
-  const achievedDate = toIstDateString(input.achievedAt);
-  const spansMultipleDays = presentDates.size > 1 || !presentDates.has(achievedDate);
+  const demoEstablishedAt = l4[l4.length - 1]?.at ?? input.achievedAt;
+  const demoDate = toIstDateString(demoEstablishedAt);
+  const spansMultipleDays = presentDates.size > 1 || !presentDates.has(demoDate);
 
   const messageKey: ComebackCardData["messageKey"] =
     input.status === "retained"
@@ -171,17 +166,12 @@ export function buildComebackCard(input: {
     presentAttemptIds,
     ...(retentionAttemptId ? { retentionAttemptId } : {}),
     achievedAt: input.achievedAt,
-    demonstratedAt:
-      input.demonstratedAt ?? (input.status === "demonstrated" ? input.achievedAt : null),
+    demonstratedAt: input.demonstratedAt ?? demoEstablishedAt,
     retainedAt: input.retainedAt ?? (input.status === "retained" ? input.achievedAt : null),
     spansMultipleDays,
     messageKey,
     copyParams,
-    message: "",
   };
 
-  return {
-    ...cardData,
-    message: formatComebackMessage(cardData),
-  };
+  return cardData;
 }

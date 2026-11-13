@@ -180,3 +180,64 @@ Updated golden scenarios in `packages/domain/src/policy/l3.golden.test.ts`:
   - `pnpm build`: Next.js 16.4.6 Turbopack build passed.
 - **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **96.21% lines** (statements `96.41%`, branches `89.38%`, functions `97.74%`), with every single file `>= 91%` (lowest is `comeback.ts` at `94.00%`).
 - **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+
+---
+
+## Phase 1: Review Corrections 2 (`2026-11-14`)
+
+### 1. Built & Corrected
+
+Addressing six second-round CEO/CTO review findings for Phase 1:
+
+1. **Fallback Precondition Validation & Fail Closed (`packages/domain/src/policy/l3.ts`):**
+   - Implemented `tryCreateFallback` to validate preconditions and construct required parameters per action (e.g. `RETRIEVAL_REVIEW` requires `reviewDue` and `dueReviewConceptId`; `REVIEW_PREREQUISITE` requires a weak prerequisite concept).
+   - In `buildFallback`: Tries `INDEPENDENT_PRACTICE` first if allowed, then iterates over `ctx.allowedActions`. If no allowed action can produce a valid fallback meeting preconditions and parameter constraints, fails closed by throwing `RangeError("Cannot authorize execution: no valid fallback action in allowedActions")`.
+2. **Boss Completion Requires Eight Resolved Outcomes (`packages/domain/src/policy/l2.ts`):**
+   - Enforced that only `"correct"` and `"incorrect"` count as resolved item outcomes.
+   - Six correct plus `unparseable` and `not_simplified` yields `resolvedCount === 6 < 8`, resulting in `completed: false` and `defeated: false`.
+   - Rejecting incomplete battle results when `requireComplete: true` throws `RangeError`.
+3. **Require `dueReviewConceptId` When `reviewDue=true` (`packages/domain/src/policy/l3.ts`, `packages/contracts/src/domain.ts`):**
+   - In `packages/domain/src/policy/l3.ts`: `decideNextAction` and `guardDecision` immediately throw `TypeError("dueReviewConceptId is required when reviewDue is true")` if `reviewDue === true` and `dueReviewConceptId` is missing. Never silently substitutes `focusConceptId`.
+   - In `packages/contracts/src/domain.ts`: Refined `DecisionContextSchema` to reject contexts where `reviewDue === true` and `dueReviewConceptId` is omitted.
+4. **Preserve Original Demonstration Citations on Retention Cards (`packages/domain/src/comeback.ts`):**
+   - Scans independent attempt history for the earliest qualifying 4-attempt demonstration window (`l4.length === 4 && okL4.length >= 3 && distinctTemplates >= 2`) following support entry.
+   - Preserves original demonstration citations (`presentAttemptIds`) on retention cards even when intervening practice attempts or warm-up attempts exist between demonstration and retention review.
+   - Records the retention review attempt ID strictly under `retentionAttemptId`.
+5. **Pure Structured Comeback Card Data in Domain (`packages/domain/src/comeback.ts`, `apps/web/server/comeback.ts`):**
+   - Removed hardcoded English copy templates (`COMEBACK_COPY_TEMPLATES`) and default `message` property/formatting from `packages/domain/src/comeback.ts`.
+   - `buildComebackCard` outputs pure structured `ComebackCardData` (`messageKey`, `copyParams`, `presentAttemptIds`, `pastAttemptIds`, etc.).
+   - Localized string formatting is handled through `apps/web/messages/en.json` via `renderComebackMessage` in `apps/web/server/comeback.ts`.
+6. **Reject ULID Overflow Encodings in Domain and Contracts (`packages/domain/src/ids.ts`, `packages/contracts/src/domain.ts`):**
+   - Enforced the 48-bit Crockford Base32 timestamp upper bound (`0..7` in the first position) in both `ULID_RE` (`/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i`) and `PrefixedUlidSchema`.
+   - Rejects overflow ULIDs starting with `8`, `9`, or letters `A..Z` (e.g. `att_80000000000000000000000000`, `att_ZZZZZZZZZZZZZZZZZZZZZZZZZZ`) while accepting max valid `att_7ZZZZZZZZZZZZZZZZZZZZZZZZZ` and normal timestamped ULIDs.
+
+### 2. Regression Tests & Results
+
+New regression tests were added and verified to fail prior to applying fixes:
+
+- `packages/domain/src/regressions.test.ts`:
+  - `CR1`: Fails closed when no valid fallback exists in `allowedActions`.
+  - `CR2`: Boss battle does not complete or defeat with 6 correct plus `unparseable` and `not_simplified`.
+  - `CR3`: Requires `dueReviewConceptId` when `reviewDue=true` and never silently substitutes focus concept.
+  - `CR4`: Preserves original demonstration citations on retention cards with intervening practice and warm-ups.
+  - `CR5`: `ComebackCardData` in domain is pure structured data without hardcoded string templates.
+  - `CR6`: Rejects ULID overflow encodings (first Crockford character > 7).
+- `packages/contracts/src/regressions.test.ts`:
+  - `CR3_contract`: `DecisionContextSchema` rejects `reviewDue=true` when `dueReviewConceptId` is missing.
+  - `CR6_contract`: Rejects ULID overflow encodings in contract schemas.
+- `apps/web/server/comeback.test.ts`:
+  - Renders structured `ComebackCardData` using `apps/web/messages/en.json` templates.
+
+**Initial reproduction failure:** All new regression tests failed as expected before fixes.
+**Post-fix verification:** All 26 test files and 155 tests pass.
+
+### 3. Verification & Coverage Results
+
+- **`pnpm verify` (Node `v22.23.5`):** exit `0`:
+  - `pnpm typecheck`: 6/6 packages passed.
+  - `pnpm lint`: 0 errors, 0 warnings.
+  - `pnpm format:check`: passed.
+  - `pnpm test`: **26 test files, 155 tests passed**.
+  - `pnpm build`: Next.js 16.4.6 Turbopack standalone build passed.
+- **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **95.76% lines** (statements `96.00%`, branches `89.34%`, functions `98.54%`), with every single file >= 90.51% (lowest is `l3.ts` at `90.51%`, `misconceptions.ts` at `91.30%`, `ids.ts` at `93.10%`).
+- **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.

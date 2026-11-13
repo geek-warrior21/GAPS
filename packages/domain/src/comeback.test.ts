@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildComebackCard, formatComebackMessage } from "./comeback";
+import { buildComebackCard } from "./comeback";
 import type { CheckedAttempt } from "./types";
 
 function attempt(
@@ -96,9 +96,15 @@ describe("buildComebackCard", () => {
     expect(card?.presentAttemptIds.length).toBe(card?.presentCorrect);
     expect(card?.spansMultipleDays).toBe(false);
     expect(card?.messageKey).toBe("comeback.singleDay");
-    expect(card?.message).toBe(
-      "On 2026-11-10 you got 1 of 5 Equivalent fractions questions. Today you answered 3 correctly on your own. That's a comeback!",
-    );
+    expect("message" in (card ?? {})).toBe(false);
+    expect(card?.copyParams).toEqual({
+      pastDate: "2026-11-10",
+      pastCorrect: 1,
+      pastTotal: 5,
+      studentTitle: "Equivalent fractions",
+      presentCorrect: 3,
+      presentTotal: 4,
+    });
   });
 
   it("handles retention comebacks and date-neutral copy when evidence spans days", () => {
@@ -126,16 +132,15 @@ describe("buildComebackCard", () => {
     expect(retainedCard?.status).toBe("retained");
     expect(retainedCard?.retentionAttemptId).toBe(history[5]!.attemptId);
     expect(retainedCard?.messageKey).toBe("comeback.retention");
-    expect(retainedCard?.message).toBe(
-      "On 2026-11-01 you got 0 of 2 Equivalent fractions questions. You locked this in with a successful review. That's a comeback!",
-    );
-
-    // Custom copy formatter
-    const custom = formatComebackMessage(
-      retainedCard!,
-      "Great work on {studentTitle}: {presentCorrect} verified!",
-    );
-    expect(custom).toBe("Great work on Equivalent fractions: 3 verified!");
+    expect("message" in (retainedCard ?? {})).toBe(false);
+    expect(retainedCard?.copyParams).toEqual({
+      pastDate: "2026-11-01",
+      pastCorrect: 0,
+      pastTotal: 2,
+      studentTitle: "Equivalent fractions",
+      presentCorrect: 3,
+      presentTotal: 4,
+    });
 
     // Retention without explicit demonstratedAt
     const retainedDerived = buildComebackCard({

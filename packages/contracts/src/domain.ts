@@ -89,11 +89,15 @@ export const BeliefSchema = z.object({
   version: z.number().int().min(0),
 });
 
-const CROCKFORD_ULID_CHARS = "[0-9A-HJKMNP-TV-Z]{26}";
+// ULID 48-bit timestamp in 10 Crockford Base32 characters maxes out at 7ZZZZZZZZZ.
+// Characters 8..Z in the first position represent an overflow (> 48 bits / > 128-bit ULID).
+const CROCKFORD_ULID_CHARS = "[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}";
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const PrefixedUlidSchema = (prefix: string) =>
-  z.string().regex(new RegExp(`^${prefix}${CROCKFORD_ULID_CHARS}$`), `Invalid ${prefix} ID`);
+export const PrefixedUlidSchema = (prefix: string) => {
+  const norm = prefix.endsWith("_") ? prefix : `${prefix}_`;
+  return z.string().regex(new RegExp(`^${norm}${CROCKFORD_ULID_CHARS}$`), `Invalid ${prefix} ID`);
+};
 
 export const AttemptIdSchema = PrefixedUlidSchema("att_");
 export const StudentIdSchema = PrefixedUlidSchema("stu_");
@@ -124,45 +128,50 @@ export const CheckedAttemptSchema = z.object({
   at: z.iso.datetime(),
 });
 
-export const DecisionContextSchema = z.object({
-  schemaVersion: z.literal(1),
-  decisionId: DecisionIdSchema,
-  studentRef: z.string().min(1),
-  stateVersion: z.number().int().min(0),
-  focusConceptId: ConceptIdSchema,
-  belief: BeliefSchema,
-  prerequisiteBeliefs: z.array(BeliefSchema),
-  lastAttempt: CheckedAttemptSchema.pick({
-    outcome: true,
-    misconceptionId: true,
-    assistance: true,
-    tryNo: true,
-  }).optional(),
-  request: z
-    .object({
-      kind: z.enum(["hint", "explain", "worked_example"]),
-      route: z.string().optional(),
-    })
-    .optional(),
-  session: z.object({
-    mode: AttemptModeSchema,
-    incorrectOnConcept: z.number().int().min(0),
-    prereqRouteTaken: z.boolean(),
-    hintRungShown: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
-    consecutiveIndependentCorrect: z.number().int().min(0),
-    currentItemServed: z.boolean().optional(),
-    currentItemResolved: z.boolean().optional(),
-    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+export const DecisionContextSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    decisionId: DecisionIdSchema,
+    studentRef: z.string().min(1),
+    stateVersion: z.number().int().min(0),
+    focusConceptId: ConceptIdSchema,
+    belief: BeliefSchema,
+    prerequisiteBeliefs: z.array(BeliefSchema),
+    lastAttempt: CheckedAttemptSchema.pick({
+      outcome: true,
+      misconceptionId: true,
+      assistance: true,
+      tryNo: true,
+    }).optional(),
+    request: z
+      .object({
+        kind: z.enum(["hint", "explain", "worked_example"]),
+        route: z.string().optional(),
+      })
+      .optional(),
+    session: z.object({
+      mode: AttemptModeSchema,
+      incorrectOnConcept: z.number().int().min(0),
+      prereqRouteTaken: z.boolean(),
+      hintRungShown: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+      consecutiveIndependentCorrect: z.number().int().min(0),
+      currentItemServed: z.boolean().optional(),
+      currentItemResolved: z.boolean().optional(),
+      difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+      justBecameDemonstrated: z.boolean().optional(),
+    }),
     justBecameDemonstrated: z.boolean().optional(),
-  }),
-  justBecameDemonstrated: z.boolean().optional(),
-  dueReviewConceptId: ConceptIdSchema.optional(),
-  reviewDue: z.boolean(),
-  allowedActions: z.array(TeachingActionSchema),
-  policyVersion: z.literal("rules-1.0"),
-  remainingSeconds: z.number().int(),
-  flags: z.object({ aiAllowed: z.boolean() }),
-});
+    dueReviewConceptId: ConceptIdSchema.optional(),
+    reviewDue: z.boolean(),
+    allowedActions: z.array(TeachingActionSchema),
+    policyVersion: z.literal("rules-1.0"),
+    remainingSeconds: z.number().int(),
+    flags: z.object({ aiAllowed: z.boolean() }),
+  })
+  .refine((data) => !data.reviewDue || Boolean(data.dueReviewConceptId), {
+    message: "dueReviewConceptId is required when reviewDue is true",
+    path: ["dueReviewConceptId"],
+  });
 
 export const DecisionResultSchema = z.object({
   decisionId: DecisionIdSchema,

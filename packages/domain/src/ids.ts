@@ -19,7 +19,9 @@ export type IdEntity = keyof typeof ID_PREFIXES;
 export type IdPrefix = (typeof ID_PREFIXES)[IdEntity];
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+// ULID 48-bit timestamp in 10 Crockford Base32 characters maxes out at 7ZZZZZZZZZ.
+// Characters 8..Z in the first position represent an overflow (> 48 bits / > 128-bit ULID).
+const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i;
 const VALID_PREFIX_SET = new Set<string>(Object.values(ID_PREFIXES));
 
 /** Generate a pure 26-character Crockford Base32 ULID from timestampMs and a seeded RNG. */

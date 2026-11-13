@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildComebackCard } from "./comeback";
+import { isValidPrefixedId } from "./ids";
 import { evaluateBossBattle } from "./policy/l2";
 import { decideNextAction, guardDecision } from "./policy/l3";
 import { makeBelief, makeContext } from "./policy/l3.test";
@@ -198,5 +199,332 @@ describe("Phase 1 review regressions (findings 1-4)", () => {
     // Over-long battle (> 8 items) must be rejected
     const nineItems = Array(9).fill("correct");
     expect(() => evaluateBossBattle(nineItems)).toThrow();
+  });
+
+  it("CR1: validates fallback action preconditions and fails closed when no valid fallback exists", () => {
+    // Only RETRIEVAL_REVIEW in allowedActions, but reviewDue is false -> no valid fallback
+    const ctxNoValidFallback = makeContext({
+      allowedActions: ["RETRIEVAL_REVIEW"],
+      reviewDue: false,
+      lastAttempt: { outcome: "incorrect", assistance: 0, tryNo: 1 },
+    });
+    expect(() => decideNextAction(ctxNoValidFallback)).toThrowError(/Cannot authorize execution/);
+
+    // Only REVIEW_PREREQUISITE in allowedActions, but no weak prerequisite -> fails closed
+    const ctxNoPrereqFallback = makeContext({
+      allowedActions: ["REVIEW_PREREQUISITE"],
+      prerequisiteBeliefs: [],
+      lastAttempt: { outcome: "incorrect", assistance: 0, tryNo: 1 },
+    });
+    expect(() => decideNextAction(ctxNoPrereqFallback)).toThrowError(/Cannot authorize execution/);
+  });
+
+  it("CR2: boss battle does not complete or defeat with 6 correct plus unparseable and not_simplified", () => {
+    const mixedOutcomes = [
+      "correct",
+      "correct",
+      "correct",
+      "correct",
+      "correct",
+      "correct",
+      "unparseable",
+      "not_simplified",
+    ] as const;
+    const res = evaluateBossBattle(mixedOutcomes);
+    expect(res.completed).toBe(false);
+    expect(res.defeated).toBe(false);
+    expect(() => evaluateBossBattle(mixedOutcomes, { requireComplete: true })).toThrow();
+  });
+
+  it("CR3: requires dueReviewConceptId when reviewDue=true and never silently substitutes focus concept", () => {
+    const ctxMissingDueReviewConcept = makeContext({
+      focusConceptId: "MATH-FRAC-ADDUNLIKE",
+      belief: makeBelief("MATH-FRAC-ADDUNLIKE", "demonstrated"),
+      lastAttempt: { outcome: "correct", assistance: 0, tryNo: 1 },
+      justBecameDemonstrated: true,
+      reviewDue: true,
+      dueReviewConceptId: undefined,
+    });
+    expect(() => decideNextAction(ctxMissingDueReviewConcept)).toThrowError(
+      /dueReviewConceptId is required when reviewDue is true/,
+    );
+  });
+
+  it("CR4: preserves original demonstration citations on retention cards with intervening practice and warm-ups", () => {
+    const history: CheckedAttempt[] = [
+      // Day 1: needs support
+      {
+        attemptId: "att_01J00000000000000000000001",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000001",
+        clientAttemptId: "11111111-1111-4111-8111-000000000001",
+        itemInstanceId: "itm_01J00000000000000000000001",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "incorrect",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-01T10:00:00.000Z",
+      },
+      // Day 2-3: C, I, C, C on T1/T2 -> qualifying demonstration citations
+      {
+        attemptId: "att_01J00000000000000000000002",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000002",
+        clientAttemptId: "11111111-1111-4111-8111-000000000002",
+        itemInstanceId: "itm_01J00000000000000000000002",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-02T10:00:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000003",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000003",
+        clientAttemptId: "11111111-1111-4111-8111-000000000003",
+        itemInstanceId: "itm_01J00000000000000000000003",
+        templateId: "T2",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "incorrect",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:00:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000004",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000003",
+        clientAttemptId: "11111111-1111-4111-8111-000000000004",
+        itemInstanceId: "itm_01J00000000000000000000004",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:05:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000005",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000003",
+        clientAttemptId: "11111111-1111-4111-8111-000000000005",
+        itemInstanceId: "itm_01J00000000000000000000005",
+        templateId: "T2",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:10:00.000Z",
+      },
+      // Day 4: Intervening independent practice attempts
+      {
+        attemptId: "att_01J00000000000000000000006",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000004",
+        clientAttemptId: "11111111-1111-4111-8111-000000000006",
+        itemInstanceId: "itm_01J00000000000000000000006",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-04T10:00:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000007",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000004",
+        clientAttemptId: "11111111-1111-4111-8111-000000000007",
+        itemInstanceId: "itm_01J00000000000000000000007",
+        templateId: "T2",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-04T10:05:00.000Z",
+      },
+      // Day 5: Warm-up review attempt
+      {
+        attemptId: "att_01J00000000000000000000008",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000005",
+        clientAttemptId: "11111111-1111-4111-8111-000000000008",
+        itemInstanceId: "itm_01J00000000000000000000008",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "review",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: true,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-05T10:00:00.000Z",
+      },
+      // Day 10: Retention review attempt (7+ days after demonstration)
+      {
+        attemptId: "att_01J00000000000000000000009",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000006",
+        clientAttemptId: "11111111-1111-4111-8111-000000000009",
+        itemInstanceId: "itm_01J00000000000000000000009",
+        templateId: "T2",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "review",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: true,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-10T10:00:00.000Z",
+      },
+    ];
+
+    const card = buildComebackCard({
+      conceptId: "MATH-FRAC-EQUIV",
+      studentTitle: "Equivalent fractions",
+      status: "retained",
+      firstNeedsSupportAt: "2026-11-01T10:00:00.000Z",
+      achievedAt: "2026-11-10T10:00:00.000Z",
+      history,
+    });
+
+    expect(card).not.toBeNull();
+    // Must cite the original demonstration attempts from Day 2-3, NOT intervening att_6, att_7, att_8
+    expect(card?.presentAttemptIds).toEqual([
+      "att_01J00000000000000000000002",
+      "att_01J00000000000000000000004",
+      "att_01J00000000000000000000005",
+    ]);
+    expect(card?.retentionAttemptId).toBe("att_01J00000000000000000000009");
+  });
+
+  it("CR5: ComebackCardData in domain is pure structured data without hardcoded string templates", () => {
+    const history: CheckedAttempt[] = [
+      {
+        attemptId: "att_01J00000000000000000000001",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000001",
+        clientAttemptId: "11111111-1111-4111-8111-000000000001",
+        itemInstanceId: "itm_01J00000000000000000000001",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "incorrect",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-01T10:00:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000002",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000002",
+        clientAttemptId: "11111111-1111-4111-8111-000000000002",
+        itemInstanceId: "itm_01J00000000000000000000002",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:00:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000003",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000002",
+        clientAttemptId: "11111111-1111-4111-8111-000000000003",
+        itemInstanceId: "itm_01J00000000000000000000003",
+        templateId: "T2",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:05:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000004",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000002",
+        clientAttemptId: "11111111-1111-4111-8111-000000000004",
+        itemInstanceId: "itm_01J00000000000000000000004",
+        templateId: "T1",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:10:00.000Z",
+      },
+      {
+        attemptId: "att_01J00000000000000000000005",
+        studentId: "stu_01J00000000000000000000001",
+        sessionId: "ses_01J00000000000000000000002",
+        clientAttemptId: "11111111-1111-4111-8111-000000000005",
+        itemInstanceId: "itm_01J00000000000000000000005",
+        templateId: "T2",
+        conceptId: "MATH-FRAC-EQUIV",
+        mode: "learn",
+        outcome: "correct",
+        assistance: 0,
+        tryNo: 1,
+        isReview: false,
+        verifierVersion: "verify-1.0",
+        at: "2026-11-03T10:15:00.000Z",
+      },
+    ];
+
+    const card = buildComebackCard({
+      conceptId: "MATH-FRAC-EQUIV",
+      studentTitle: "Equivalent fractions",
+      status: "demonstrated",
+      firstNeedsSupportAt: "2026-11-01T10:00:00.000Z",
+      achievedAt: "2026-11-03T10:15:00.000Z",
+      history,
+    });
+    expect(card).not.toBeNull();
+    // card must not have hardcoded message property
+    expect("message" in (card ?? {})).toBe(false);
+  });
+
+  it("CR6: rejects ULID overflow encodings (first Crockford character > 7)", () => {
+    expect(isValidPrefixedId("att_80000000000000000000000000", "attempt")).toBe(false);
+    expect(isValidPrefixedId("att_90000000000000000000000000", "attempt")).toBe(false);
+    expect(isValidPrefixedId("att_A0000000000000000000000000", "attempt")).toBe(false);
+    expect(isValidPrefixedId("att_ZZZZZZZZZZZZZZZZZZZZZZZZZZ", "attempt")).toBe(false);
+    expect(isValidPrefixedId("att_7ZZZZZZZZZZZZZZZZZZZZZZZZZ", "attempt")).toBe(true);
+    expect(isValidPrefixedId("att_01J00000000000000000000001", "attempt")).toBe(true);
   });
 });

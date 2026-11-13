@@ -79,4 +79,86 @@ describe("L3 guard and fallback", () => {
     expect(invalid.fallbackUsed).toBe(true);
     expect(invalid.reasonCodes).toEqual(["R0_DEFAULT"]);
   });
+
+  it("handles guardDecision invalid parameters and fallback action selection", () => {
+    const ctx = makeContext({
+      allowedActions: ["EXPLAIN", "VISUALIZE", "REQUEST_REVIEW"],
+    });
+
+    // Invalid difficulty falls back to allowed action (EXPLAIN)
+    const badDiff = guardDecision(ctx, {
+      decisionId: ctx.decisionId,
+      selectedAction: "EXPLAIN",
+      params: { difficulty: 5 as unknown as 1 },
+      reasonCodes: ["TEST"],
+      provider: "rules",
+      policyVersion: POLICY_VERSION,
+      fallbackUsed: false,
+      latencyMs: 0,
+    });
+    expect(badDiff.selectedAction).toBe("EXPLAIN");
+    expect(badDiff.params.route).toBe("everyday");
+    expect(badDiff.fallbackUsed).toBe(true);
+
+    // Invalid hintRung in GIVE_HINT
+    const ctxHint = makeContext({ allowedActions: ["GIVE_HINT"] });
+    const badHint = guardDecision(ctxHint, {
+      decisionId: ctxHint.decisionId,
+      selectedAction: "GIVE_HINT",
+      params: { hintRung: 9 as unknown as 1 },
+      reasonCodes: ["TEST"],
+      provider: "rules",
+      policyVersion: POLICY_VERSION,
+      fallbackUsed: false,
+      latencyMs: 0,
+    });
+    expect(badHint.selectedAction).toBe("GIVE_HINT");
+    expect(badHint.params.hintRung).toBe(1);
+
+    // RETRIEVAL_REVIEW with mismatched target concept
+    const ctxRet = makeContext({
+      reviewDue: true,
+      dueReviewConceptId: "MATH-FRAC-PART",
+      allowedActions: ["INDEPENDENT_PRACTICE"],
+    });
+    const badRet = guardDecision(ctxRet, {
+      decisionId: ctxRet.decisionId,
+      selectedAction: "RETRIEVAL_REVIEW",
+      params: { conceptId: "MATH-NUM-LCM" },
+      reasonCodes: ["TEST"],
+      provider: "rules",
+      policyVersion: POLICY_VERSION,
+      fallbackUsed: false,
+      latencyMs: 0,
+    });
+    expect(badRet.selectedAction).toBe("INDEPENDENT_PRACTICE");
+
+    // REVIEW_PREREQUISITE with non-prerequisite concept
+    const badPrereq = guardDecision(ctxRet, {
+      decisionId: ctxRet.decisionId,
+      selectedAction: "REVIEW_PREREQUISITE",
+      params: { conceptId: "MATH-FRAC-WORD" },
+      reasonCodes: ["TEST"],
+      provider: "rules",
+      policyVersion: POLICY_VERSION,
+      fallbackUsed: false,
+      latencyMs: 0,
+    });
+    expect(badPrereq.selectedAction).toBe("INDEPENDENT_PRACTICE");
+
+    // Rule 1 when hintRungShown >= 3 returns WORKED_EXAMPLE
+    const ctxMaxHint = makeContext({
+      session: {
+        mode: "learn",
+        incorrectOnConcept: 0,
+        prereqRouteTaken: false,
+        hintRungShown: 3,
+        consecutiveIndependentCorrect: 0,
+        currentItemServed: true,
+      },
+      request: { kind: "hint" },
+    });
+    const maxHintRes = decideNextAction(ctxMaxHint);
+    expect(maxHintRes.selectedAction).toBe("WORKED_EXAMPLE");
+  });
 });
