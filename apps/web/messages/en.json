@@ -55,6 +55,11 @@
       }
     ]
   },
+  "comeback": {
+    "singleDay": "On {pastDate} you got {pastCorrect} of {pastTotal} {studentTitle} questions. Today you answered {presentCorrect} correctly on your own. That's a comeback!",
+    "multiDay": "On {pastDate} you got {pastCorrect} of {pastTotal} {studentTitle} questions. You answered {presentCorrect} correctly on your own. That's a comeback!",
+    "retention": "On {pastDate} you got {pastCorrect} of {pastTotal} {studentTitle} questions. You locked this in with a successful review. That's a comeback!"
+  },
   "guardrails": {
     "title": "Active V0.1 safety posture",
     "items": [

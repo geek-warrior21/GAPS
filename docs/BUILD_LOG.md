@@ -112,3 +112,71 @@
 
 - Present `G01`–`G40` golden scenarios for education-lead sign-off alongside Phase 2 content review.
 - Proceed to Phase 2 (`packages/content` 14 concepts, ≥ 40 templates, explanations, `content:check`, `content:preview` CLI) when instructed.
+
+---
+
+## Phase 1: Review Corrections (`2026-11-13`)
+
+### 1. Built & Corrected
+
+Addressing five CEO/CTO review findings for Phase 1:
+
+1. **Policy Guard (`packages/domain/src/policy/l3.ts`):**
+   - Fallback action selection now strictly respects `ctx.allowedActions`: prefers `INDEPENDENT_PRACTICE` if present, otherwise chooses `ctx.allowedActions[0]`. Never returns an action outside `allowedActions`.
+   - Explicitly rejects empty `allowedActions` by throwing `RangeError("Cannot authorize execution: allowedActions is empty")` in both `guardDecision` and `decideNextAction`, refusing to authorize execution.
+2. **R13 & Review Routing (`packages/domain/src/policy/l3.ts`, `packages/domain/src/types.ts`):**
+   - Added `justBecameDemonstrated?: boolean` and `dueReviewConceptId?: ConceptId` to `DecisionContext`.
+   - Rule 13 now requires explicit transition signal (`ctx.justBecameDemonstrated === true || ctx.session.justBecameDemonstrated === true`). Concepts with `belief.status === "demonstrated"` where `justBecameDemonstrated` is not set fall through to Rule 14 (`INDEPENDENT_PRACTICE`).
+   - Rule 13 routes retrieval practice to `ctx.dueReviewConceptId ?? ctx.focusConceptId`, ensuring due reviews target the actual due concept.
+3. **Comeback Evidence and Copy (`packages/domain/src/comeback.ts`, `apps/web/messages/en.json`):**
+   - `buildComebackCard` now returns pure structured data (`ComebackCardData`):
+     - Cites qualifying demonstration evidence (`okL4`, up to 4 attempt IDs with distinct templates/items).
+     - Consistent counts and citations: `presentCorrect === presentAttemptIds.length`.
+     - Detects multi-day spans (`spansMultipleDays`) and selects `messageKey: "comeback.singleDay" | "comeback.multiDay" | "comeback.retention"`.
+     - Supports retention citations with `retentionAttemptId`.
+   - Student copy resides in `apps/web/messages/en.json` with date-neutral wording when evidence spans days (e.g. `"You worked through this over several days"` instead of labeling historical attempts as `"today"`).
+   - Formatter helper `formatComebackMessage(card, template?)` handles string rendering cleanly.
+4. **Boss Completion (`packages/domain/src/policy/l2.ts`):**
+   - Boss battle length invariant enforced: `BOSS_BATTLE_ITEM_COUNT = 8`.
+   - Incomplete battles (`outcomes.length < 8`) never declare victory (`defeated: false`).
+   - Out-of-bounds outcome lengths (`outcomes.length > 8`) or incomplete submissions when `requireComplete: true` throw `RangeError`.
+5. **Contracts & ID Validation (`packages/contracts/src/domain.ts`, `packages/contracts/src/step.ts`):**
+   - Replaced loose prefix checks with full 30-character prefixed ULID schemas (`att_`, `stu_`, `ses_`, `itm_`, `dec_`, `qst_`, `bos_` followed by 26 Crockford Base32 characters: `^[0123456789ABCDEFGHJKMNPQRSTVWXYZabcdefghjkmnpqrstvwxyz]{26}$`).
+   - Validates RFC 4122 UUID v4 for `clientAttemptId` via `ClientAttemptIdSchema`.
+   - Updated test fixtures across all domain and contract suites with valid ULIDs and UUID v4s.
+
+### 2. Regression Tests & Results
+
+Two dedicated regression test suites reproduce and guard against all five findings:
+
+- `packages/domain/src/regressions.test.ts`:
+  - F1a: Fallback never returns action outside `allowedActions`.
+  - F1b: Empty `allowedActions` throws `RangeError` without authorizing execution.
+  - F2a: R13 triggers only when `justBecameDemonstrated: true`, falls through to R14 when false.
+  - F2b: R13 routes retrieval to `dueReviewConceptId` when specified on a different concept.
+  - F3: Comeback card cites qualifying evidence, handles multi-day learning, retention, and C,I,C,C sequences with date-neutral copy.
+  - F4: Boss completion requires all 8 items before declaring victory and rejects invalid result lengths.
+- `packages/contracts/src/regressions.test.ts`:
+  - F5: Rejects malformed IDs (`att_01`, `uuid-1`, invalid Base32) and accepts full 30-char prefixed ULIDs and UUID v4.
+
+**Initial reproduction failure:** Before fixes were applied, running both suites produced 5/5 targeted failures as expected.
+**Post-fix verification:** Both suites pass completely (7/7 tests passed).
+
+### 3. Golden Scenario Updates & Rationale
+
+Updated golden scenarios in `packages/domain/src/policy/l3.golden.test.ts`:
+
+- **G08:** Updated to set `justBecameDemonstrated: true` and `dueReviewConceptId: "MATH-FRAC-PART"` so Rule 13 routes retrieval practice to the actual due concept.
+- **G31 & G32:** Updated with `justBecameDemonstrated: true` to explicitly indicate the transition to demonstrated status that qualifies for Rule 13 retrieval practice.
+- All golden scenarios retain `educatorReviewStatus: "pending"`; no educator sign-off was fabricated.
+
+### 4. Verification & Coverage Results
+
+- **`pnpm verify` (Node `v22.23.5`):** exit `0`:
+  - `pnpm typecheck`: 6/6 packages passed.
+  - `pnpm lint`: 0 errors, 0 warnings.
+  - `pnpm format:check`: passed.
+  - `pnpm test`: **25 test files, 143 tests passed**.
+  - `pnpm build`: Next.js 16.4.6 Turbopack build passed.
+- **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **96.21% lines** (statements `96.41%`, branches `89.38%`, functions `97.74%`), with every single file `>= 91%` (lowest is `comeback.ts` at `94.00%`).
+- **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.

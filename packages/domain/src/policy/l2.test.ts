@@ -112,7 +112,7 @@ describe("L2 session composition", () => {
     };
 
     const qNoReview = composeDailyQuest({
-      studentId: "stu_01J",
+      studentId: "stu_01J00000000000000000000001",
       istDate: "2026-11-12",
       grade: 7,
       startConceptId: null,
@@ -123,7 +123,7 @@ describe("L2 session composition", () => {
     expect(qNoReview.slots[3]?.conceptId).toBe("MATH-FRAC-COMPARE");
 
     const qTwoReviews = composeDailyQuest({
-      studentId: "stu_01J",
+      studentId: "stu_01J00000000000000000000001",
       istDate: "2026-11-12",
       grade: 7,
       startConceptId: null,
@@ -139,7 +139,7 @@ describe("L2 session composition", () => {
     ]);
     expect(qTwoReviews).toEqual(
       composeDailyQuest({
-        studentId: "stu_01J",
+        studentId: "stu_01J00000000000000000000001",
         istDate: "2026-11-12",
         grade: 7,
         startConceptId: null,
@@ -166,7 +166,7 @@ describe("L2 session composition", () => {
     expect(canUnlockChapterBoss("B", beliefsB)).toBe(true);
 
     const battle = composeBossBattle({
-      studentId: "stu_01J",
+      studentId: "stu_01J00000000000000000000001",
       istDate: "2026-11-12",
       chapter: "B",
       beliefs: beliefsB,
@@ -189,5 +189,15 @@ describe("L2 session composition", () => {
       evaluateBossBattle(Array(5).fill("correct").concat(["incorrect", "incorrect", "incorrect"]))
         .defeated,
     ).toBe(false);
+
+    // Incomplete battle (< 8 items) must never declare victory
+    const incomplete = evaluateBossBattle(Array(6).fill("correct"));
+    expect(incomplete.total).toBe(6);
+    expect(incomplete.completed).toBe(false);
+    expect(incomplete.defeated).toBe(false);
+    expect(() => evaluateBossBattle(Array(6).fill("correct"), { requireComplete: true })).toThrow();
+
+    // Over-long battle (> 8 items) is rejected
+    expect(() => evaluateBossBattle(Array(9).fill("correct"))).toThrow();
   });
 });

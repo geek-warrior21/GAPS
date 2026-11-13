@@ -95,7 +95,7 @@ describe("beliefReducer", () => {
         bSameItem,
         makeAttempt(i, {
           conceptId: "MATH-NUM-HCF",
-          itemInstanceId: "itm_same",
+          itemInstanceId: "itm_01J00000000000000000000099",
           templateId: i % 2 === 0 ? "T1" : "T2",
         }),
         { templatesForConcept: 1 },

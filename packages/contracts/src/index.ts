@@ -12,16 +12,25 @@ export {
 } from "./health";
 
 export {
+  AttemptIdSchema,
   AttemptModeSchema,
   AttemptOutcomeSchema,
   BeliefSchema,
   BeliefStatusSchema,
+  BossIdSchema,
   CheckedAttemptSchema,
+  ClientAttemptIdSchema,
   ConceptIdSchema,
   DecisionContextSchema,
+  DecisionIdSchema,
   DecisionResultSchema,
+  ItemInstanceIdSchema,
   MisconceptionIdSchema,
+  PrefixedUlidSchema,
+  QuestIdSchema,
   ReliabilitySchema,
+  SessionIdSchema,
+  StudentIdSchema,
   TeachingActionSchema,
 } from "./domain";
 

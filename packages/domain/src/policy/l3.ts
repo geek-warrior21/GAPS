@@ -1,9 +1,9 @@
 import {
   type Belief,
-  type ConceptId,
   type DecisionContext,
   type DecisionResult,
   POLICY_VERSION,
+  type TeachingAction,
 } from "../types";
 import { targetDifficulty } from "./l2";
 
@@ -19,15 +19,29 @@ function clampDifficulty(value: number): 1 | 2 | 3 {
   return 2;
 }
 
-function buildFallback(
-  decisionId: string,
-  conceptId: ConceptId,
-  reasonCode = "R0_DEFAULT",
-): DecisionResult {
+function selectFallbackAction(allowedActions: readonly TeachingAction[]): TeachingAction {
+  if (allowedActions.length === 0) {
+    throw new RangeError("Cannot authorize execution: allowedActions is empty");
+  }
+  if (allowedActions.includes("INDEPENDENT_PRACTICE")) {
+    return "INDEPENDENT_PRACTICE";
+  }
+  const fallback = allowedActions[0];
+  if (!fallback) {
+    throw new RangeError("Cannot authorize execution: allowedActions is empty");
+  }
+  return fallback;
+}
+
+function buildFallback(ctx: DecisionContext, reasonCode = "R0_DEFAULT"): DecisionResult {
+  const selectedAction = selectFallbackAction(ctx.allowedActions);
   return {
-    decisionId,
-    selectedAction: "INDEPENDENT_PRACTICE",
-    params: { conceptId, difficulty: 1 },
+    decisionId: ctx.decisionId,
+    selectedAction,
+    params: {
+      conceptId: ctx.focusConceptId,
+      ...(selectedAction === "INDEPENDENT_PRACTICE" ? { difficulty: 1 } : {}),
+    },
     reasonCodes: [reasonCode],
     provider: "rules",
     policyVersion: POLICY_VERSION,
@@ -41,8 +55,12 @@ function buildFallback(
  * and action preconditions per SPEC §8.
  */
 export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): DecisionResult {
+  if (ctx.allowedActions.length === 0) {
+    throw new RangeError("Cannot authorize execution: allowedActions is empty");
+  }
+
   if (!ctx.allowedActions.includes(candidate.selectedAction)) {
-    return buildFallback(ctx.decisionId, ctx.focusConceptId, "R0_DEFAULT");
+    return buildFallback(ctx, "R0_DEFAULT");
   }
 
   if (
@@ -51,26 +69,26 @@ export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): 
     candidate.params.difficulty !== 2 &&
     candidate.params.difficulty !== 3
   ) {
-    return buildFallback(ctx.decisionId, ctx.focusConceptId, "R0_DEFAULT");
+    return buildFallback(ctx, "R0_DEFAULT");
   }
 
   switch (candidate.selectedAction) {
     case "GIVE_HINT": {
       const rung = candidate.params.hintRung;
       if (rung !== 1 && rung !== 2 && rung !== 3) {
-        return buildFallback(ctx.decisionId, ctx.focusConceptId, "R0_DEFAULT");
+        return buildFallback(ctx, "R0_DEFAULT");
       }
       break;
     }
     case "RETRIEVAL_REVIEW": {
       if (!ctx.reviewDue) {
-        return buildFallback(ctx.decisionId, ctx.focusConceptId, "R0_DEFAULT");
+        return buildFallback(ctx, "R0_DEFAULT");
       }
       break;
     }
     case "REVIEW_PREREQUISITE": {
       if (!candidate.params.conceptId) {
-        return buildFallback(ctx.decisionId, ctx.focusConceptId, "R0_DEFAULT");
+        return buildFallback(ctx, "R0_DEFAULT");
       }
       break;
     }
@@ -86,6 +104,10 @@ export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): 
  * Pure, zero-I/O decision engine; every candidate passes guardDecision.
  */
 export function decideNextAction(ctx: DecisionContext): DecisionResult {
+  if (ctx.allowedActions.length === 0) {
+    throw new RangeError("Cannot authorize execution: allowedActions is empty");
+  }
+
   const { decisionId, focusConceptId, belief, prerequisiteBeliefs, lastAttempt, request, session } =
     ctx;
 
@@ -229,11 +251,14 @@ export function decideNextAction(ctx: DecisionContext): DecisionResult {
       });
     }
 
-    // Rule 13: Correct independently and concept demonstrated/retained
-    if (belief.status === "demonstrated" || belief.status === "retained") {
+    // Rule 13: Correct independently and concept just became demonstrated
+    const justDemonstrated =
+      ctx.justBecameDemonstrated === true || ctx.session.justBecameDemonstrated === true;
+    if (justDemonstrated) {
       if (ctx.reviewDue) {
+        const targetConceptId = ctx.dueReviewConceptId ?? focusConceptId;
         return make("RETRIEVAL_REVIEW", "R13_DEMONSTRATED", {
-          conceptId: focusConceptId,
+          conceptId: targetConceptId,
         });
       }
       return make("ADVANCE", "R13_DEMONSTRATED", {
@@ -248,5 +273,5 @@ export function decideNextAction(ctx: DecisionContext): DecisionResult {
     });
   }
 
-  return buildFallback(decisionId, focusConceptId, "R0_DEFAULT");
+  return buildFallback(ctx, "R0_DEFAULT");
 }

@@ -19,18 +19,18 @@ describe("sparks and weekly rhythm", () => {
 
     const ind = computeSparksAward({
       kind: "correct",
-      sourceId: "att_01",
+      sourceId: "att_01J00000000000000000000001",
       assistance: 0,
       currentDailyTotal: 0,
       currentLifetimeTotal: 90,
     });
     expect(ind.awarded).toBe(10);
-    expect(ind.key).toBe(sparkIdempotencyKey("att_01", "correct"));
+    expect(ind.key).toBe(sparkIdempotencyKey("att_01J00000000000000000000001", "correct"));
     expect(ind.milestonesUnlocked).toEqual([100]);
 
     const assisted = computeSparksAward({
       kind: "correct",
-      sourceId: "att_02",
+      sourceId: "att_01J00000000000000000000002",
       assistance: 2,
       currentDailyTotal: 0,
       currentLifetimeTotal: 0,
@@ -40,7 +40,7 @@ describe("sparks and weekly rhythm", () => {
     expect(
       computeSparksAward({
         kind: "demonstrated",
-        sourceId: "evt_demo",
+        sourceId: "evt_01J00000000000000000000001",
         currentDailyTotal: 0,
         currentLifetimeTotal: 0,
       }).awarded,
@@ -49,7 +49,7 @@ describe("sparks and weekly rhythm", () => {
     expect(
       computeSparksAward({
         kind: "quest",
-        sourceId: "qst_02",
+        sourceId: "qst_01J00000000000000000000002",
         currentDailyTotal: 0,
         currentLifetimeTotal: 0,
       }).awarded,
@@ -58,7 +58,7 @@ describe("sparks and weekly rhythm", () => {
     expect(
       computeSparksAward({
         kind: "boss_finish",
-        sourceId: "bos_02",
+        sourceId: "bos_01J00000000000000000000002",
         currentDailyTotal: 0,
         currentLifetimeTotal: 0,
       }).awarded,
@@ -66,10 +66,10 @@ describe("sparks and weekly rhythm", () => {
   });
 
   it("enforces idempotency, daily cap of 300, and non-negative awards", () => {
-    const existing = new Set([sparkIdempotencyKey("qst_01", "quest")]);
+    const existing = new Set([sparkIdempotencyKey("qst_01J00000000000000000000001", "quest")]);
     const dup = computeSparksAward({
       kind: "quest",
-      sourceId: "qst_01",
+      sourceId: "qst_01J00000000000000000000001",
       currentDailyTotal: 50,
       currentLifetimeTotal: 50,
       existingKeys: existing,
@@ -79,7 +79,7 @@ describe("sparks and weekly rhythm", () => {
 
     const nearCap = computeSparksAward({
       kind: "boss_win",
-      sourceId: "bos_01",
+      sourceId: "bos_01J00000000000000000000001",
       currentDailyTotal: 280,
       currentLifetimeTotal: 490,
     });
@@ -90,7 +90,7 @@ describe("sparks and weekly rhythm", () => {
 
     const atCap = computeSparksAward({
       kind: "retained",
-      sourceId: "evt_01",
+      sourceId: "evt_01J00000000000000000000002",
       currentDailyTotal: 300,
       currentLifetimeTotal: 510,
     });

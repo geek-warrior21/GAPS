@@ -89,12 +89,29 @@ export const BeliefSchema = z.object({
   version: z.number().int().min(0),
 });
 
+const CROCKFORD_ULID_CHARS = "[0-9A-HJKMNP-TV-Z]{26}";
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const PrefixedUlidSchema = (prefix: string) =>
+  z.string().regex(new RegExp(`^${prefix}${CROCKFORD_ULID_CHARS}$`), `Invalid ${prefix} ID`);
+
+export const AttemptIdSchema = PrefixedUlidSchema("att_");
+export const StudentIdSchema = PrefixedUlidSchema("stu_");
+export const SessionIdSchema = PrefixedUlidSchema("ses_");
+export const ItemInstanceIdSchema = PrefixedUlidSchema("itm_");
+export const DecisionIdSchema = PrefixedUlidSchema("dec_");
+export const QuestIdSchema = PrefixedUlidSchema("qst_");
+export const BossIdSchema = PrefixedUlidSchema("bos_");
+export const ClientAttemptIdSchema = z
+  .string()
+  .regex(UUID_V4_REGEX, "Invalid clientAttemptId UUID v4");
+
 export const CheckedAttemptSchema = z.object({
-  attemptId: z.string().startsWith("att_"),
-  studentId: z.string().startsWith("stu_"),
-  sessionId: z.string().startsWith("ses_"),
-  clientAttemptId: z.string().min(1),
-  itemInstanceId: z.string().startsWith("itm_"),
+  attemptId: AttemptIdSchema,
+  studentId: StudentIdSchema,
+  sessionId: SessionIdSchema,
+  clientAttemptId: ClientAttemptIdSchema,
+  itemInstanceId: ItemInstanceIdSchema,
   templateId: z.string().min(1),
   conceptId: ConceptIdSchema,
   mode: AttemptModeSchema,
@@ -109,7 +126,7 @@ export const CheckedAttemptSchema = z.object({
 
 export const DecisionContextSchema = z.object({
   schemaVersion: z.literal(1),
-  decisionId: z.string().startsWith("dec_"),
+  decisionId: DecisionIdSchema,
   studentRef: z.string().min(1),
   stateVersion: z.number().int().min(0),
   focusConceptId: ConceptIdSchema,
@@ -136,7 +153,10 @@ export const DecisionContextSchema = z.object({
     currentItemServed: z.boolean().optional(),
     currentItemResolved: z.boolean().optional(),
     difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    justBecameDemonstrated: z.boolean().optional(),
   }),
+  justBecameDemonstrated: z.boolean().optional(),
+  dueReviewConceptId: ConceptIdSchema.optional(),
   reviewDue: z.boolean(),
   allowedActions: z.array(TeachingActionSchema),
   policyVersion: z.literal("rules-1.0"),
@@ -145,10 +165,10 @@ export const DecisionContextSchema = z.object({
 });
 
 export const DecisionResultSchema = z.object({
-  decisionId: z.string().startsWith("dec_"),
+  decisionId: DecisionIdSchema,
   selectedAction: TeachingActionSchema,
   params: z.object({
-    itemInstanceId: z.string().startsWith("itm_").optional(),
+    itemInstanceId: ItemInstanceIdSchema.optional(),
     hintRung: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
     conceptId: ConceptIdSchema.optional(),
     route: z.string().optional(),

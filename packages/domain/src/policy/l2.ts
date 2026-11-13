@@ -331,15 +331,31 @@ export function composeBossBattle(input: {
   };
 }
 
-export function evaluateBossBattle(outcomes: readonly AttemptOutcome[]): {
+export function evaluateBossBattle(
+  outcomes: readonly AttemptOutcome[],
+  options?: { readonly requireComplete?: boolean },
+): {
   readonly score: number;
   readonly total: number;
+  readonly completed: boolean;
   readonly defeated: boolean;
 } {
+  if (outcomes.length > BOSS_BATTLE_ITEM_COUNT) {
+    throw new RangeError(
+      `Boss battle cannot exceed ${BOSS_BATTLE_ITEM_COUNT} items, received ${outcomes.length}`,
+    );
+  }
+  if (options?.requireComplete && outcomes.length !== BOSS_BATTLE_ITEM_COUNT) {
+    throw new RangeError(
+      `Boss battle requires exactly ${BOSS_BATTLE_ITEM_COUNT} resolved items, received ${outcomes.length}`,
+    );
+  }
   const score = outcomes.filter((o) => o === "correct").length;
+  const completed = outcomes.length === BOSS_BATTLE_ITEM_COUNT;
   return {
     score,
     total: outcomes.length,
-    defeated: score >= BOSS_BATTLE_PASS_SCORE,
+    completed,
+    defeated: completed && score >= BOSS_BATTLE_PASS_SCORE,
   };
 }

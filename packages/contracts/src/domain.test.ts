@@ -20,7 +20,7 @@ describe("contracts: domain & step schemas", () => {
     const ctx = DecisionContextSchema.parse({
       schemaVersion: 1,
       decisionId: "dec_01J00000000000000000000001",
-      studentRef: "stu_anon_01",
+      studentRef: "stu_01J00000000000000000000001",
       stateVersion: 2,
       focusConceptId: "MATH-FRAC-EQUIV",
       belief,

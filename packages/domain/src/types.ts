@@ -213,7 +213,10 @@ export interface DecisionContext {
     readonly currentItemServed?: boolean;
     readonly currentItemResolved?: boolean;
     readonly difficulty?: 1 | 2 | 3;
+    readonly justBecameDemonstrated?: boolean;
   };
+  readonly justBecameDemonstrated?: boolean;
+  readonly dueReviewConceptId?: ConceptId;
   readonly reviewDue: boolean;
   readonly allowedActions: readonly TeachingAction[];
   readonly policyVersion: typeof POLICY_VERSION;

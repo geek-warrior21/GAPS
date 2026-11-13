@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConceptIdSchema } from "./domain";
+import { ConceptIdSchema, ItemInstanceIdSchema } from "./domain";
 
 export const RichTextSegmentSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("text"), v: z.string() }),
@@ -68,7 +68,7 @@ export const VisualSpecSchema = z.discriminatedUnion("type", [
 /** Client-safe item payload; strict object excludes answers, misconceptions, and seeds (I9). */
 export const ItemViewSchema = z
   .object({
-    id: z.string().startsWith("itm_"),
+    id: ItemInstanceIdSchema,
     conceptId: ConceptIdSchema,
     prompt: RichTextSchema,
     visual: VisualSpecSchema.optional(),

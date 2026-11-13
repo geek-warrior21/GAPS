@@ -25,7 +25,7 @@ export function makeContext(overrides: Partial<DecisionContext> = {}): DecisionC
   return {
     schemaVersion: 1,
     decisionId: "dec_01J00000000000000000000001",
-    studentRef: "stu_anon_01",
+    studentRef: "stu_01J00000000000000000000001",
     stateVersion: 5,
     focusConceptId: "MATH-FRAC-ADDUNLIKE",
     belief: makeBelief("MATH-FRAC-ADDUNLIKE", "developing"),
