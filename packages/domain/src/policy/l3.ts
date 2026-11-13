@@ -1,5 +1,6 @@
 import {
   type Belief,
+  type ConceptId,
   type DecisionContext,
   type DecisionResult,
   POLICY_VERSION,
@@ -7,10 +8,39 @@ import {
 } from "../types";
 import { targetDifficulty } from "./l2";
 
-function findWeakPrerequisite(prereqs: readonly Belief[]): Belief | undefined {
-  return prereqs.find(
-    (b) => b.status === "not_assessed" || b.status === "needs_support" || b.status === "developing",
-  );
+export function isEligibleWeakPrerequisite(b: Belief): boolean {
+  return b.status === "not_assessed" || b.status === "needs_support" || b.status === "developing";
+}
+
+export function findWeakPrerequisite(prereqs: readonly Belief[]): Belief | undefined {
+  return prereqs.find(isEligibleWeakPrerequisite);
+}
+
+export function isValidPrerequisiteRoute(
+  ctx: DecisionContext,
+  targetConceptId?: ConceptId,
+): boolean {
+  if (ctx.session.prereqRouteTaken) {
+    return false;
+  }
+  if (!targetConceptId) {
+    return false;
+  }
+  const prereq = ctx.prerequisiteBeliefs.find((b) => b.conceptId === targetConceptId);
+  if (!prereq) {
+    return false;
+  }
+  return isEligibleWeakPrerequisite(prereq);
+}
+
+export function isValidRetrievalReview(ctx: DecisionContext, targetConceptId?: ConceptId): boolean {
+  if (!ctx.reviewDue || !ctx.dueReviewConceptId) {
+    return false;
+  }
+  if (!targetConceptId || targetConceptId !== ctx.dueReviewConceptId) {
+    return false;
+  }
+  return true;
 }
 
 function clampDifficulty(value: number): 1 | 2 | 3 {
@@ -42,11 +72,14 @@ function tryCreateFallback(
   } else if (action === "GIVE_HINT") {
     hintRung = clampDifficulty(ctx.session.hintRungShown + 1) as 1 | 2 | 3;
   } else if (action === "RETRIEVAL_REVIEW") {
-    if (!ctx.reviewDue || !ctx.dueReviewConceptId) {
+    if (!ctx.dueReviewConceptId || !isValidRetrievalReview(ctx, ctx.dueReviewConceptId)) {
       return null;
     }
     conceptId = ctx.dueReviewConceptId;
   } else if (action === "REVIEW_PREREQUISITE") {
+    if (ctx.session.prereqRouteTaken) {
+      return null;
+    }
     const weakPrereq = findWeakPrerequisite(ctx.prerequisiteBeliefs);
     if (!weakPrereq) {
       return null;
@@ -97,6 +130,10 @@ export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): 
     throw new RangeError("Cannot authorize execution: allowedActions is empty");
   }
 
+  if (ctx.reviewDue && !ctx.dueReviewConceptId) {
+    throw new TypeError("dueReviewConceptId is required when reviewDue is true");
+  }
+
   if (!ctx.allowedActions.includes(candidate.selectedAction)) {
     return buildFallback(ctx, "R0_DEFAULT");
   }
@@ -119,22 +156,13 @@ export function guardDecision(ctx: DecisionContext, candidate: DecisionResult): 
       break;
     }
     case "RETRIEVAL_REVIEW": {
-      if (!ctx.reviewDue || !candidate.params.conceptId) {
-        return buildFallback(ctx, "R0_DEFAULT");
-      }
-      if (ctx.dueReviewConceptId && candidate.params.conceptId !== ctx.dueReviewConceptId) {
+      if (!isValidRetrievalReview(ctx, candidate.params.conceptId)) {
         return buildFallback(ctx, "R0_DEFAULT");
       }
       break;
     }
     case "REVIEW_PREREQUISITE": {
-      if (!candidate.params.conceptId) {
-        return buildFallback(ctx, "R0_DEFAULT");
-      }
-      const isPrereq = ctx.prerequisiteBeliefs.some(
-        (b) => b.conceptId === candidate.params.conceptId,
-      );
-      if (!isPrereq) {
+      if (!isValidPrerequisiteRoute(ctx, candidate.params.conceptId)) {
         return buildFallback(ctx, "R0_DEFAULT");
       }
       break;

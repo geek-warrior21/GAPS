@@ -90,7 +90,7 @@ describe("rational", () => {
       fc.property(arbRational, arbRational, arbRational, (a, b, c) => {
         const ab = cmp(a, b);
         const ba = cmp(b, a);
-        expect(ab).toBe(-ba);
+        expect(ab).toBe(-ba === 0 ? 0 : -ba);
         expect(eq(a, b)).toBe(ab === 0);
         if (cmp(a, b) <= 0 && cmp(b, c) <= 0) {
           expect(cmp(a, c)).toBeLessThanOrEqual(0);

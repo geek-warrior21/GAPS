@@ -257,6 +257,91 @@ export function replayBeliefs(
   );
 }
 
+export interface DemonstrationTransition {
+  readonly conceptId: ConceptId;
+  readonly demonstratedAt: string;
+  readonly attemptId: string;
+  readonly supportingAttemptIds: readonly string[];
+  readonly totalAttemptIds: readonly string[];
+}
+
+export interface RetentionTransition {
+  readonly retainedAt: string;
+  readonly retentionAttemptId: string;
+  readonly demonstration: DemonstrationTransition | null;
+}
+
+export interface TransitionHistory {
+  readonly state: BeliefState;
+  readonly currentDemonstration: DemonstrationTransition | null;
+  readonly retentionTransition: RetentionTransition | null;
+}
+
+/**
+ * Replay attempts chronologically through beliefReducer, capturing authoritative
+ * state transitions to 'demonstrated' and 'retained' and tracking supporting attempt citations.
+ */
+export function replayTransitions(
+  conceptId: ConceptId,
+  attempts: readonly CheckedAttempt[],
+  ctx: BeliefReducerContext = { templatesForConcept: 2 },
+): TransitionHistory {
+  const ordered = [...attempts]
+    .filter((a) => a.conceptId === conceptId)
+    .sort((a, b) => {
+      const diff = Date.parse(a.at) - Date.parse(b.at);
+      return diff !== 0 ? diff : a.attemptId.localeCompare(b.attemptId);
+    });
+
+  let state = createInitialBeliefState(conceptId);
+  let currentDemonstration: DemonstrationTransition | null = null;
+  let retentionTransition: RetentionTransition | null = null;
+
+  for (const a of ordered) {
+    const prevState = state;
+    state = beliefReducer(state, a, ctx);
+
+    // 1. Transition into demonstrated (initial or re-demonstration after demotion)
+    if (prevState.status !== "demonstrated" && state.status === "demonstrated") {
+      const ind = state.history.filter((x) => x.assistance === 0);
+      const l4 = ind.slice(-4);
+      const okL4 = l4.filter((x) => x.outcome === "correct");
+      currentDemonstration = {
+        conceptId,
+        demonstratedAt: a.at,
+        attemptId: a.attemptId,
+        supportingAttemptIds: okL4.map((x) => x.attemptId),
+        totalAttemptIds: l4.map((x) => x.attemptId),
+      };
+      retentionTransition = null;
+    }
+
+    // 2. Demotion from demonstrated or retained to needs_support
+    if (
+      (prevState.status === "demonstrated" || prevState.status === "retained") &&
+      state.status === "needs_support"
+    ) {
+      currentDemonstration = null;
+      retentionTransition = null;
+    }
+
+    // 3. Transition into retained
+    if (prevState.status === "demonstrated" && state.status === "retained") {
+      retentionTransition = {
+        retainedAt: a.at,
+        retentionAttemptId: a.attemptId,
+        demonstration: currentDemonstration,
+      };
+    }
+  }
+
+  return {
+    state,
+    currentDemonstration,
+    retentionTransition,
+  };
+}
+
 /** Compute read-time effective reliability (staleness is > 30 days since lastEvidenceAt). */
 export function computeEffectiveReliability(state: BeliefState, nowIso: string): Reliability {
   if (state.history.length === 0 || state.lastEvidenceAt === null) {

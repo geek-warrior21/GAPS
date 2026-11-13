@@ -1,3 +1,4 @@
+import { replayTransitions } from "./belief";
 import { toIstDateString } from "./sparks";
 import type { BeliefStatus, CheckedAttempt, ConceptId } from "./types";
 
@@ -33,7 +34,7 @@ export interface ComebackCardData {
 /**
  * Build a Comeback Card per SPEC §19.7 when a concept becomes demonstrated or retained
  * at least 24 hours after firstNeedsSupportAt.
- * Returns pure structured data citing the stored evidence that established demonstration (okL4).
+ * Uses authoritative transition evidence from replayTransitions / beliefReducer.
  * Copy templates live in apps/web/messages/en.json.
  */
 export function buildComebackCard(input: {
@@ -45,6 +46,7 @@ export function buildComebackCard(input: {
   readonly demonstratedAt?: string | null;
   readonly retainedAt?: string | null;
   readonly history: readonly CheckedAttempt[];
+  readonly templatesForConcept?: number;
 }): ComebackCardData | null {
   if (input.status !== "demonstrated" && input.status !== "retained") {
     return null;
@@ -76,65 +78,41 @@ export function buildComebackCard(input: {
   const pastCorrect = pastDayAttempts.filter((a) => a.outcome === "correct").length;
   const pastTotal = pastDayAttempts.length;
 
-  const indEvidence = input.history
-    .filter(
-      (a) =>
-        a.conceptId === input.conceptId &&
-        a.assistance === 0 &&
-        (a.outcome === "correct" || a.outcome === "incorrect") &&
-        Date.parse(a.at) <= achievedMs,
-    )
-    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const evidenceUpToAchieved = input.history.filter(
+    (a) => a.conceptId === input.conceptId && Date.parse(a.at) <= achievedMs,
+  );
 
-  let retentionAttemptId: string | undefined;
-
-  if (input.status === "retained") {
-    const reviewAttempt = indEvidence
-      .filter((a) => a.isReview && a.outcome === "correct")
-      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
-    if (reviewAttempt) {
-      retentionAttemptId = reviewAttempt.attemptId;
-    }
-  }
-
-  const demoCandidates = indEvidence.filter((a) => {
-    if (input.demonstratedAt) {
-      return Date.parse(a.at) <= Date.parse(input.demonstratedAt);
-    }
-    if (input.status === "retained" && retentionAttemptId) {
-      return a.attemptId !== retentionAttemptId && Date.parse(a.at) < Date.parse(input.achievedAt);
-    }
-    return Date.parse(a.at) <= achievedMs;
+  const transitions = replayTransitions(input.conceptId, evidenceUpToAchieved, {
+    templatesForConcept: input.templatesForConcept ?? 2,
   });
 
-  // Find the earliest qualifying window of 4 attempts that established demonstration
-  let originalDemoL4: readonly CheckedAttempt[] | null = null;
-  let originalDemoOkL4: readonly CheckedAttempt[] | null = null;
-
-  for (let i = 3; i < demoCandidates.length; i++) {
-    const window = demoCandidates.slice(i - 3, i + 1);
-    const ok = window.filter((a) => a.outcome === "correct");
-    const distinctTemplates = new Set(ok.map((a) => a.templateId)).size;
-    if (ok.length >= 3 && distinctTemplates >= 2) {
-      originalDemoL4 = window;
-      originalDemoOkL4 = ok;
-      break;
-    }
-  }
-
-  const l4 = originalDemoL4 ?? demoCandidates.slice(-4);
-  const okL4 = originalDemoOkL4 ?? l4.filter((a) => a.outcome === "correct");
-  if (okL4.length < 3) {
+  const demo = transitions.retentionTransition?.demonstration ?? transitions.currentDemonstration;
+  if (!demo || demo.supportingAttemptIds.length < 3) {
     return null;
   }
 
-  const presentAttemptIds = okL4.map((a) => a.attemptId);
-  const presentCorrect = presentAttemptIds.length;
-  const presentTotal = l4.length;
+  let retentionAttemptId: string | undefined;
+  if (input.status === "retained") {
+    retentionAttemptId = transitions.retentionTransition?.retentionAttemptId;
+    if (!retentionAttemptId) {
+      const reviewAttempt = evidenceUpToAchieved
+        .filter((a) => a.assistance === 0 && a.isReview && a.outcome === "correct")
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+      if (reviewAttempt) {
+        retentionAttemptId = reviewAttempt.attemptId;
+      }
+    }
+  }
 
-  const presentDates = new Set(okL4.map((a) => toIstDateString(a.at)));
-  const demoEstablishedAt = l4[l4.length - 1]?.at ?? input.achievedAt;
-  const demoDate = toIstDateString(demoEstablishedAt);
+  const presentAttemptIds = demo.supportingAttemptIds;
+  const presentCorrect = presentAttemptIds.length;
+  const presentTotal = demo.totalAttemptIds.length;
+
+  const supportingAttempts = evidenceUpToAchieved.filter((a) =>
+    presentAttemptIds.includes(a.attemptId),
+  );
+  const presentDates = new Set(supportingAttempts.map((a) => toIstDateString(a.at)));
+  const demoDate = toIstDateString(demo.demonstratedAt);
   const spansMultipleDays = presentDates.size > 1 || !presentDates.has(demoDate);
 
   const messageKey: ComebackCardData["messageKey"] =
@@ -166,8 +144,12 @@ export function buildComebackCard(input: {
     presentAttemptIds,
     ...(retentionAttemptId ? { retentionAttemptId } : {}),
     achievedAt: input.achievedAt,
-    demonstratedAt: input.demonstratedAt ?? demoEstablishedAt,
-    retainedAt: input.retainedAt ?? (input.status === "retained" ? input.achievedAt : null),
+    demonstratedAt: input.demonstratedAt ?? demo.demonstratedAt,
+    retainedAt:
+      input.retainedAt ??
+      (input.status === "retained"
+        ? (transitions.retentionTransition?.retainedAt ?? input.achievedAt)
+        : null),
     spansMultipleDays,
     messageKey,
     copyParams,

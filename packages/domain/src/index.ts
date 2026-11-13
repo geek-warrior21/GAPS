@@ -73,10 +73,14 @@ export {
   computeEffectiveReliability,
   createInitialBeliefState,
   replayBeliefs,
+  replayTransitions,
   toPublicBelief,
   type BeliefReducerContext,
   type BeliefState,
+  type DemonstrationTransition,
+  type RetentionTransition,
   type ReviewEffect,
+  type TransitionHistory,
 } from "./belief";
 export {
   GRADE_ENTRY,
@@ -116,7 +120,14 @@ export {
   type QuestSlot,
   type TemplateCandidate,
 } from "./policy/l2";
-export { decideNextAction, guardDecision } from "./policy/l3";
+export {
+  decideNextAction,
+  findWeakPrerequisite,
+  guardDecision,
+  isEligibleWeakPrerequisite,
+  isValidPrerequisiteRoute,
+  isValidRetrievalReview,
+} from "./policy/l3";
 export {
   DAILY_SPARKS_CAP,
   SPARK_AMOUNTS,

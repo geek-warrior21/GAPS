@@ -241,3 +241,67 @@ New regression tests were added and verified to fail prior to applying fixes:
   - `pnpm build`: Next.js 16.4.6 Turbopack standalone build passed.
 - **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **95.76% lines** (statements `96.00%`, branches `89.34%`, functions `98.54%`), with every single file >= 90.51% (lowest is `l3.ts` at `90.51%`, `misconceptions.ts` at `91.30%`, `ids.ts` at `93.10%`).
 - **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+
+---
+
+## Phase 1: Review 3 — Shared Guard Predicates & Authoritative Belief Transitions (`2026-11-13`)
+
+Addressing the two remaining review findings following commit `73ebfb3`:
+
+### 1. Built & Refactored
+
+1. **Shared Guard Validation Across Normal Decisions, Guard Calls & Fallbacks (`packages/domain/src/policy/l3.ts`):**
+   - Extracted and shared explicit predicates:
+     - `isEligibleWeakPrerequisite(b: Belief)`: checks `b.status === "not_assessed" || b.status === "needs_support" || b.status === "developing"`.
+     - `findWeakPrerequisite(prereqs: readonly Belief[])`: selects the first eligible weak prerequisite.
+     - `isValidPrerequisiteRoute(ctx: DecisionContext, targetConceptId?: ConceptId)`: verifies `!ctx.session.prereqRouteTaken`, that `targetConceptId` is provided, belongs to `ctx.prerequisiteBeliefs`, and is an eligible weak prerequisite.
+     - `isValidRetrievalReview(ctx: DecisionContext, targetConceptId?: ConceptId)`: verifies `ctx.reviewDue === true`, `ctx.dueReviewConceptId` is defined, and `targetConceptId === ctx.dueReviewConceptId`.
+   - Direct `guardDecision`:
+     - If `ctx.reviewDue === true` and `!ctx.dueReviewConceptId`, fails closed immediately by throwing `TypeError("dueReviewConceptId is required when reviewDue is true")`, matching `decideNextAction` even when candidate supplies a `conceptId`.
+     - `RETRIEVAL_REVIEW`: validated using `isValidRetrievalReview`.
+     - `REVIEW_PREREQUISITE`: validated using `isValidPrerequisiteRoute` (rejects demonstrated/retained prerequisites and rejects when `prereqRouteTaken === true`).
+   - `tryCreateFallback`:
+     - `RETRIEVAL_REVIEW`: validated using `isValidRetrievalReview(ctx, ctx.dueReviewConceptId)`.
+     - `REVIEW_PREREQUISITE`: checks `!ctx.session.prereqRouteTaken` and requires `findWeakPrerequisite(ctx.prerequisiteBeliefs)`. If only `REVIEW_PREREQUISITE` is allowed and preconditions fail, `buildFallback` fails closed with `RangeError`.
+
+2. **Authoritative Transition Evidence in Comeback Cards (`packages/domain/src/belief.ts`, `packages/domain/src/comeback.ts`):**
+   - Removed the separate rolling-window approximation from `buildComebackCard`.
+   - Added `replayTransitions(conceptId, attempts, ctx)` to `packages/domain/src/belief.ts`:
+     - Chronologically steps through `beliefReducer` directly, capturing authoritative transitions to `"demonstrated"` and `"retained"`.
+     - Tracks exact qualifying supporting attempt IDs (`okL4`) and 4-attempt window (`l4`) at the moment of demonstration qualification.
+     - When demoted to `"needs_support"`, resets the active demonstration.
+     - When re-demonstrated following demotion, records the fresh qualifying demonstration transition.
+     - When transitioned to `"retained"`, captures `retentionAttemptId` while preserving the supporting attempts from the active demonstration.
+   - `buildComebackCard`:
+     - Replays history up to `achievedAt` through `replayTransitions`.
+     - Uses `transitions.retentionTransition?.demonstration ?? transitions.currentDemonstration` for authoritative supporting attempts.
+     - Exactly resolves sequence `I, I, C(T1), C(T1), C(T1), I(T1), C(T2), C(T2)`: demonstration occurs at attempt 8, citing attempts 5, 7, 8 (not 4, 5, 7).
+     - Preserves original demonstration citations across intervening practice and warm-up attempts before retention review.
+     - Correctly cites the new qualifying attempts on demotion followed by re-demonstration.
+
+3. **Rational Trichotomy Object.is Hardening (`packages/domain/src/rational.test.ts`):**
+   - Normalized `-0` vs `+0` in property test trichotomy assertion `expect(ab).toBe(-ba === 0 ? 0 : -ba)` to avoid `Object.is(+0, -0)` failure during randomized fast-check runs.
+
+### 2. Regression Tests & Results
+
+Failing regressions were added in `packages/domain/src/regressions.test.ts` prior to fixing:
+
+- `Issue 1a`: `guardDecision` with `reviewDue=true` and no `dueReviewConceptId` throws `TypeError` even with candidate `conceptId`.
+- `Issue 1b`: `guardDecision` rejects `REVIEW_PREREQUISITE` if target is demonstrated or if `prereqRouteTaken=true`, falling back or failing closed when only `REVIEW_PREREQUISITE` is allowed.
+- `Issue 2a`: Sequence `I, I, C(T1), C(T1), C(T1), I(T1), C(T2), C(T2)` with 2 reviewed templates achieves demonstration at attempt 8, citing attempts 5, 7, 8 (not 4, 5, 7).
+- `Issue 2b`: Retention card preserves original demonstration citations even after intervening practice.
+- `Issue 2c`: Demotion followed by re-demonstration cites the fresh re-demonstration attempts (8, 9, 10), not old pre-demotion attempts.
+
+**Reproduction:** 4/5 new tests failed on the previous codebase.
+**Post-fix:** All 26 test files and 160 tests pass.
+
+### 3. Verification & Coverage Results
+
+- **`pnpm verify` (Node `v22.23.5`):** exit `0`:
+  - `pnpm typecheck`: 6/6 workspace packages passed.
+  - `pnpm lint`: 0 errors, 0 warnings.
+  - `pnpm format:check`: passed.
+  - `pnpm test`: **26 test files, 160 tests passed**.
+  - `pnpm build`: Next.js 16.4.6 Turbopack standalone build passed.
+- **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **95.88% lines** (statements `96.09%`, branches `89.69%`, functions `98.58%`), with every single module >= 91.33% line coverage (lowest is `l3.ts` at `91.33%`, `ids.ts` at `93.10%`, `l1.ts` at `94.73%`).
+- **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
