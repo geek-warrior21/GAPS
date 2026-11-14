@@ -306,12 +306,12 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **95.88% lines** (statements `96.09%`, branches `89.69%`, functions `98.58%`), with every single module >= 91.33% line coverage (lowest is `l3.ts` at `91.33%`, `ids.ts` at `93.10%`, `l1.ts` at `94.73%`).
 - **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
 
-
 ---
 
 ## 2026-11-14 — Phase 2: Fractions Curriculum, Templates, Explanations and Content Validation
 
 ### Built
+
 - **Fractions Curriculum Definitions (`packages/content`):**
   - Chapters: 3 chapters (A: Meet the fractions, B: Fraction operations, C: Fractions in the world) per SPEC §22.
   - Concepts: All 14 concepts (`MATH-FRAC-PART` through `MATH-FRAC-WORD`) with descriptions, grade bands (6–8), student-facing titles, and topological order (1–14).
@@ -328,11 +328,56 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
   - Root `package.json`: Integrated `content:check` as a mandatory commit gate in `pnpm verify`.
 
 ### Verification Results
+
 - `pnpm verify`: 100% green (typecheck, lint, format:check, content:check, test, build).
 - `pnpm content:check`: 42 templates verified across 500 seeds each — 0 errors.
 - Tests: 26 files passed, 170 tests passed.
 - PostgreSQL 16 & Live Health Check: `pnpm db:up` healthy, `GET /api/v1/health` HTTP 200 with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
 
 ### Assumptions
+
 - Templates marked `status: "draft"` in development without fabricating educator review signatures, per SPEC §10 & §22.
 - Hint rungs guide methods and steps without leaking unstated factors or answers.
+
+---
+
+## 2026-11-14 — Phase 3: Database Schema, Migrations, Seed Data, Replay, and Principal Repositories
+
+### Built
+
+- **Drizzle PostgreSQL Schema (`packages/db/src/schema.ts`):**
+  - Implemented all 30 PostgreSQL tables from SPEC §18:
+    - Organizations, Cohorts, Users, Teacher Cohorts, Consent Records, Auth Sessions, Feature Flags.
+    - Chapters, Concepts, Concept Edges, Misconceptions, Templates, Item Instances.
+    - Learning Sessions, Attempts, Events, Concept Beliefs, Student State, Decision Traces.
+    - Review Schedule, Quests, Boss Battles, Sparks Ledger, Comeback Cards, Solve Threads, Solve Messages.
+    - Flags, LLM Calls, Audit Log, Deletion Requests.
+  - Foreign key cascades configured on student deletion (`onDelete: "cascade"`).
+  - Enforced unique partial indexes (active consent `where revoked_at IS NULL`, due reviews `where status = 'due'`).
+  - Generated initial Drizzle SQL migration `packages/db/migrations/0000_robust_zzzax.sql`.
+- **Database Tools & Scripts:**
+  - `packages/db/src/migrate.ts`: programmatic migration runner applying Drizzle migrations to PostgreSQL 16.
+  - `packages/db/src/content-sync.ts`: idempotent synchronization of all chapters, concepts, DAG edges, misconceptions, and templates from `@gaps/content`.
+  - `packages/db/src/crypto.ts`: secure PIN and password hashing/verification using `scrypt`.
+  - `packages/db/src/seed.ts`: seeded demo org (Delhi Public Model School), cohort 7A (join code `DEMO7A`), users (`meera`, `kabir`, `aarav`, `teacher@demo.gaps`, `admin@demo.gaps`), student states, Meera's historical session demonstrating `MATH-FRAC-EQUIV`, retention review due, daily quest, and feature flags. Verified idempotency.
+  - `packages/db/src/reset.ts`: drops schemas, applies migrations, syncs content, and seeds database.
+  - `packages/db/src/replay.ts`: reevaluates stored student attempts against authoritative domain logic (`replayBeliefs`) and verifies zero mismatches with stored projections.
+- **Principal-Scoped Repositories (`packages/db/src/repos/`):**
+  - `content.ts`: queries curriculum chapters, concepts, edges, templates, and provides idempotent `findOrCreateItemInstance`.
+  - `student.ts`: `createStudentRepo(studentId)` scoping all queries and mutations to the authenticated student, enforcing attempt idempotency via `(sessionId, clientAttemptId)`, session abandonment, spark awards, and active consent checks.
+  - `teacher.ts`: `createTeacherRepo(teacherId)` scoping access strictly to assigned cohorts (`teacher_cohorts`), roster views, student progress, flags, and consent recording/revocation.
+  - `admin.ts`: `createAdminRepo(adminId)` managing cohorts, assignments, feature flags, audit logs, and cascading student deletion requests.
+
+### Verification Results
+
+- `pnpm verify`: 100% green across typecheck, lint, format:check, content:check, db:migrate, db:seed, unit/integration tests, and Next.js standalone build.
+- Tests: 28 files passed, 182 tests passed.
+- Replay Verification: `verifyStudentReplay` passed on seeded student Meera across all 14 concepts with 0 mismatches.
+- PostgreSQL 16: Container `gaps-postgres` healthy; live health check `GET /api/v1/health` HTTP 200 with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+
+### Assumptions
+
+- Seed data creates cohort 7A with join code `DEMO7A`, student Meera with PIN `333333`, Kabir with PIN `444444`, Aarav with PIN `121212`, teacher with `teacher@demo.gaps`, and admin with `admin@demo.gaps`.
+- Unassessed concepts in `concept_beliefs` default to status `not_assessed`.
+- `pnpm db:migrate && pnpm db:seed` added as a mandatory commit gate in `pnpm verify` per Phase 3 requirements.
+

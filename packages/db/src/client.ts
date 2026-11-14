@@ -1,7 +1,10 @@
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
 import { loadRootEnv } from "./env";
+import * as schema from "./schema";
 
-const clients = new Map<string, Sql>();
+const sqlClients = new Map<string, Sql>();
+const dbClients = new Map<string, PostgresJsDatabase<typeof schema>>();
 
 /**
  * Returns a pooled postgres.js client for the given connection URL.
@@ -16,7 +19,7 @@ export function getSqlClient(databaseUrl?: string): Sql {
   if (!resolvedUrl || resolvedUrl.trim() === "") {
     throw new Error("DATABASE_URL is not configured");
   }
-  const existing = clients.get(resolvedUrl);
+  const existing = sqlClients.get(resolvedUrl);
   if (existing) {
     return existing;
   }
@@ -25,13 +28,31 @@ export function getSqlClient(databaseUrl?: string): Sql {
     connect_timeout: 2,
     idle_timeout: 20,
   });
-  clients.set(resolvedUrl, sql);
+  sqlClients.set(resolvedUrl, sql);
   return sql;
 }
 
+/**
+ * Returns a typed Drizzle ORM client instance backed by postgres.js.
+ */
+export function getDb(databaseUrl?: string): PostgresJsDatabase<typeof schema> {
+  const sql = getSqlClient(databaseUrl);
+  const resolvedUrl = databaseUrl ?? process.env.DATABASE_URL!;
+  const existing = dbClients.get(resolvedUrl);
+  if (existing) {
+    return existing;
+  }
+  const db = drizzle(sql, { schema });
+  dbClients.set(resolvedUrl, db);
+  return db;
+}
+
+export type DbClient = PostgresJsDatabase<typeof schema>;
+
 /** Closes all cached SQL connection pools cleanly. */
 export async function closeSqlClients(): Promise<void> {
-  const pending = Array.from(clients.values()).map((sql) => sql.end({ timeout: 2 }));
-  clients.clear();
+  const pending = Array.from(sqlClients.values()).map((sql) => sql.end({ timeout: 2 }));
+  sqlClients.clear();
+  dbClients.clear();
   await Promise.allSettled(pending);
 }
