@@ -425,3 +425,50 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - Seeded student Meera has active `core_learning` consent; seeded student Kabir starts with `pending_consent` (no active consent) to verify consent gating.
 - Lockout threshold: 10 failed attempts for students, 5 for staff, locking for 15 minutes.
 
+---
+
+## 2026-11-14 — Phase 5: Learning Session Engine, Attempt Processing, Quests, GapMap, and Review Scheduling
+
+### Built
+
+- **Contracts (`packages/contracts/src/session.ts`):**
+  - Zod schemas for SessionMode (`learn`, `review`, `quest`, `boss`, `quick_check`, `solve_followup`).
+  - Request/Response schemas for start session (`StartSessionRequestSchema`, `StartSessionResponseSchema`).
+  - Attempt submission (`SubmitAttemptRequestSchema`, `SubmitAttemptResponseSchema`) with UUID v4 validation on `clientAttemptId`.
+  - Help request (`RequestHelpRequestSchema`, `RequestHelpResponseSchema`) supporting 3 hint rungs, worked examples, and 3 explanation routes (`picture`, `everyday`, `steps`).
+  - Home dashboard (`HomeDashboardResponseSchema`) and Daily Quest (`QuestDtoSchema`, `QuestSlotSchema`).
+  - GapMap response (`GapMapResponseSchema`, `GapMapConceptNodeSchema`).
+- **Learning Engine (`apps/web/server/session/engine.ts`):**
+  - Session lifecycle: enforces invariant of 1 active learning session per student by abandoning previous active sessions.
+  - Step generation from templates: client-safe `ItemViewDto` omitting answers and misconceptions (INVARIANT §10).
+  - Exact grading: BigInt Rational arithmetic via `@gaps/domain` `verify(answerSpec, rawAnswer, misconceptions)`.
+  - Two-try rule: incorrect first tries offer a second try (`feedback_then_retry` with friendly feedback "not yet!", never "wrong" or "failed", INVARIANT §9).
+  - Attempt idempotency: deduplicates by `clientAttemptId` and returns cached attempt response.
+  - Authoritative belief updates: replays stored evidence through `@gaps/domain` `replayTransitions` upon resolved attempts.
+  - Sparks ledger: awards +2 sparks on first-try-correct, +20 sparks on newly demonstrated concepts.
+  - Review scheduling: schedules +2d warmup review and +7d retention review on demonstration.
+  - Comeback Card: triggers milestone card if demonstrated after `firstNeedsSupportAt`.
+  - Daily Quest: generates or retrieves today's 3-slot quest (review, target, challenge) using Asia/Kolkata date.
+  - Home Dashboard & GapMap: computes student status across all 14 concepts and prerequisite edges.
+- **Learning API Routes (`apps/web/app/api/v1/`):**
+  - `POST /api/v1/sessions/start`: starts learning session (enforces core consent).
+  - `GET /api/v1/sessions/[sessionId]`: fetches session state and current step.
+  - `POST /api/v1/sessions/[sessionId]/attempt`: submits and grades attempt.
+  - `POST /api/v1/sessions/[sessionId]/help`: requests hint, worked example, or explanation.
+  - `GET /api/v1/home`: returns student profile, daily quest, due reviews, and focus concept.
+  - `GET /api/v1/gapmap`: returns strand graph with all 14 concepts, statuses, and prerequisites.
+  - `GET /api/v1/quests/today`: returns daily quest progress.
+- **Tests (`apps/web/server/session.test.ts`):**
+  - 11 comprehensive tests validating answer sanitization, 1-active-session invariant, two-try rule, student-friendly copy, attempt idempotency, BigInt grading, Sparks awards, 3 hint rungs, worked examples, explanations, consent gating, and HTTP API handlers.
+
+### Verification Results
+
+- `pnpm verify`: 100% green across typecheck, lint, format:check, content:check, db:migrate, db:seed, unit/integration tests, and Next.js standalone build.
+- Tests: **31 test files, 209 tests passed**.
+- PostgreSQL 16: Container `gaps-postgres` healthy; all session and attempt APIs verified.
+
+### Assumptions
+
+- Client-safe `ItemViewDto` strictly omits `templateId`, `answer`, and `misconceptions`.
+- First-try incorrect attempts transition to `feedback_then_retry` step containing the item view and friendly copy.
+- BigInt values in answer specifications and parsed values are recursively serialized to strings for Postgres `jsonb` columns, and hydrated to BigInts upon retrieval.
