@@ -305,3 +305,34 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
   - `pnpm build`: Next.js 16.4.6 Turbopack standalone build passed.
 - **`pnpm test:coverage` (`packages/domain/src/**/*.ts`):** exit `0` — **95.88% lines** (statements `96.09%`, branches `89.69%`, functions `98.58%`), with every single module >= 91.33% line coverage (lowest is `l3.ts` at `91.33%`, `ids.ts` at `93.10%`, `l1.ts` at `94.73%`).
 - **PostgreSQL 16 & Live Health Check:** `pnpm db:up` healthy (`gaps-postgres`), `GET /api/v1/health` returned HTTP `200` with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+
+
+---
+
+## 2026-11-14 — Phase 2: Fractions Curriculum, Templates, Explanations and Content Validation
+
+### Built
+- **Fractions Curriculum Definitions (`packages/content`):**
+  - Chapters: 3 chapters (A: Meet the fractions, B: Fraction operations, C: Fractions in the world) per SPEC §22.
+  - Concepts: All 14 concepts (`MATH-FRAC-PART` through `MATH-FRAC-WORD`) with descriptions, grade bands (6–8), student-facing titles, and topological order (1–14).
+  - Prerequisite Edges: All 18 prerequisite edges defining the fractions DAG.
+  - Misconceptions: All 15 catalogued misconceptions (`MC-PART-RATIO` through `MC-DEC-DIGITS`) with student feedback and teacher notes.
+  - Explanations: 14 concepts × 3 routes (`picture`, `everyday`, `steps`) <= 90 words with Class 6 Indian contexts.
+- **Templates & Question Generators:**
+  - 42 authored question templates across all 14 concepts (exactly 3 per concept, exceeding >= 40 requirement).
+  - Marked `review: { status: "draft" }` for development.
+  - Generates prompts, inputs (`number`, `fraction`, `mixed`, `decimal`, `comparison`, `choice`), answer specs, hint rungs (3 rungs), visual specs (`fraction_bar`, `number_line`, `area_model`), and worked examples.
+- **Validation & CLI Tooling (`content:check` & `content:preview`):**
+  - `packages/content/src/check.ts`: 500 seeds tested per template (21,000 generated items). Verified graph acyclicity via Kahn's algorithm, topological ordering, distinct items (>= 20 per template), well-formed answers, no misconception collision/answer equality, and zero hint leaks.
+  - `packages/content/src/preview.ts`: CLI for inspecting rendered items with prompts, answers, misconceptions, and hint rungs.
+  - Root `package.json`: Integrated `content:check` as a mandatory commit gate in `pnpm verify`.
+
+### Verification Results
+- `pnpm verify`: 100% green (typecheck, lint, format:check, content:check, test, build).
+- `pnpm content:check`: 42 templates verified across 500 seeds each — 0 errors.
+- Tests: 26 files passed, 170 tests passed.
+- PostgreSQL 16 & Live Health Check: `pnpm db:up` healthy, `GET /api/v1/health` HTTP 200 with `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+
+### Assumptions
+- Templates marked `status: "draft"` in development without fabricating educator review signatures, per SPEC §10 & §22.
+- Hint rungs guide methods and steps without leaking unstated factors or answers.

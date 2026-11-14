@@ -13,5 +13,8 @@
     "typecheck": "tsc --noEmit",
     "content:check": "tsx src/check.ts",
     "content:preview": "tsx src/preview.ts"
+  },
+  "dependencies": {
+    "@gaps/domain": "workspace:*"
   }
 }

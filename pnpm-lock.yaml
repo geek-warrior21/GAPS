@@ -100,7 +100,11 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
-  packages/content: {}
+  packages/content:
+    dependencies:
+      '@gaps/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/contracts:
     dependencies:

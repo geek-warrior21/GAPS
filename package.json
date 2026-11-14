@@ -23,7 +23,7 @@
     "db:reset": "pnpm --filter @gaps/db db:reset",
     "content:check": "pnpm --filter @gaps/content content:check",
     "content:preview": "pnpm --filter @gaps/content content:preview",
-    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
+    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm content:check && pnpm test && pnpm build",
     "test:e2e": "pnpm --filter @gaps/web test:e2e"
   },
   "devDependencies": {
