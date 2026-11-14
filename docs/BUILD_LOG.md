@@ -584,3 +584,67 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - Content validation: `content:check` verified 42 templates across 500 seeds each.
 - Database: PostgreSQL 16 verified healthy; migrations and seeds idempotent.
 - Next.js build: Standalone production build compiled successfully.
+
+## 14 Nov 2026 — Phase 8: Context-Aware AI Maths Tutor
+
+**Commit Goal:** Implement a context-aware, curriculum-grounded AI maths tutor that understands student learning situations and guides reasoning without leaking answers, complete with progressive disclosure, visual model integration, deterministic fallback when LLM is disabled, and full session-scoped persistence.
+
+### Built in this Milestone
+
+- **Workstream A: Server-Side Tutor Context Engine (`apps/web/server/tutor/context.ts`):**
+  - Implemented `TutorContextBuilder` (`buildTutorContext`) strictly scoped to authenticated student and active session.
+  - Minimal context assembly: current concept, prerequisite hierarchy from `EDGES`, weak prerequisites, active question metadata, forbidden canonical answer strings (for leak prevention), recent attempt history, active misconceptions, curriculum explanations (`EXPLANATIONS`), current belief estimate, and revealed hints count.
+  - Defense in depth: untrusted student input is fenced within `<student_text>` to prevent prompt injection.
+
+- **Workstream B & F: Conversational Tutor & UI Panel (`apps/web/components/session/TutorPanel.tsx`, `SessionPlayer.tsx`):**
+  - Responsive, non-intrusive collapsible drawer integrated into `SessionPlayer.tsx`.
+  - Distinguishes tutor guidance clearly from independent answer submission on the AnswerPad.
+  - Quick action chips for high-frequency student intents:
+    - `💡 Give me a hint` (progressive hint disclosure)
+    - `❓ Why was I not yet?` (misconception-aware clarification shown after incorrect attempts)
+    - `🔄 Explain differently` (cycles everyday/picture/step explanations)
+    - `🖼️ Show visual` (displays structured visual models like fraction bars and number lines)
+    - `📖 Show example` (worked examples with alternate numbers)
+  - Free-text input field with remaining turns badge (enforcing 10 turns per session limit).
+  - Inline rendering of visual models inside tutor message bubbles via `VisualViewer`.
+
+- **Workstream C: LLM Provider Abstraction (`packages/ai`):**
+  - Defined `LLMProvider` interface in `packages/ai/src/types.ts` supporting `generate<T>` with Zod schema validation and `moderate(text)` per SPEC §21.
+  - `OpenAiProvider`: Server-side only, configurable model (`LLM_MODEL_TUTOR`), endpoint (`OPENAI_BASE_URL`), timeout handling via `AbortSignal`, and structured JSON mode.
+  - `MockProvider`: Deterministic responses with explicit fault injection modes (`leaks_answer`, `timeout`, `error`, `refused`, `invalid_json`, `moderation_flagged`, `too_long`, `off_topic`).
+  - `DisabledProvider`: Fallback provider returning `{ ok: false, reason: "disabled" }`.
+  - Provider factory `getLlmProvider()` instantiating based on `readAiEnv()`.
+
+- **Workstream D & E: Pedagogical Response Policy & Deterministic Fallback (`apps/web/server/tutor/policy.ts`, `service.ts`):**
+  - Progressive hint ladder: small nudge (Hint 1) -> targeted step (Hint 2) -> near-complete step (Hint 3) -> worked example.
+  - Misconception remediation: automatically surfaces `studentFeedback` from `MISCONCEPTIONS` in `@gaps/content`.
+  - Visual models: dynamically supplies validated `VisualSpecDto` structures.
+  - Deterministic fallback: when `LLM_PROVIDER=disabled` or generation fails/leaks, curriculum content answers student queries without breaking the session loop.
+  - Invariant §3 strictly preserved: tutor interactions NEVER award sparks, mutate beliefs, or change quest status.
+
+- **Workstream G & H: Safety, Privacy, Cost Controls & Persistence:**
+  - `scrubPii`: Strips email addresses, Indian & international phone numbers, URLs, and school roster names with `[removed]`.
+  - `checkAnswerLeak`: Scans tutor messages for numeric tokens and fractions matching the question's canonical answer; rejects leaks before reaching the student.
+  - Word count guard: limits responses to <= 90 words.
+  - Session-level turn limits: max 10 assistant turns per learning session.
+  - Audit logging: records metadata to `llm_calls` table without storing student prompt text or model output.
+  - Persistence & Idempotency: conversation history preserved in `session.counters.tutorMessages`; duplicate submissions with the same `clientMessageId` return cached replies without incrementing counters.
+
+- **Contracts & Routing (`packages/contracts/src/tutor.ts`, `apps/web/app/api/v1/sessions/[sessionId]/tutor/route.ts`):**
+  - `TutorMessageSchema`, `TutorRequestSchema`, `TutorResponseSchema`, `TutorHistoryResponseSchema`.
+  - Authenticated `GET` and `POST` route handlers enforcing core consent and student session ownership.
+
+- **Testing Suite:**
+  - `packages/ai/src/guards.test.ts`: 10 unit tests for PII scrubbing, word counting, and answer leak detection.
+  - `packages/ai/src/providers.test.ts`: 8 unit tests for provider implementations and fault modes.
+  - `apps/web/server/tutor.test.ts`: 10 comprehensive integration tests for context builder, progressive hints, misconception clarification, visual model returns, off-topic redirection, idempotency, student isolation, API routes, and Invariant §3 verification.
+  - `apps/web/e2e/student-journey.spec.ts`: Playwright test scenario S5 verifying student tutor panel interaction, quick actions, free-text reasoning, and subsequent independent submission on desktop and mobile viewports.
+
+### Verification Results
+
+- `pnpm verify`: 100% green exit code 0.
+- Unit & integration tests: **37 test files, 258 tests passed**.
+- Playwright E2E: **10 tests passed across Desktop and Mobile Chromium**.
+- Content validation: `content:check` verified 42 templates across 500 seeds each.
+- Database: PostgreSQL 16 verified healthy; migrations and seeds idempotent.
+- Next.js build: Standalone production build compiled successfully.

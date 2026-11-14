@@ -82,6 +82,7 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
   const meeraId = "stu_01J00000000000000000000001";
   const kabirId = "stu_01J00000000000000000000002";
   const aaravId = "stu_01J00000000000000000000003";
+  const ananyaId = "stu_01J00000000000000000000004";
   const teacherId = "usr_01J00000000000000000000001";
   const adminId = "usr_01J00000000000000000000002";
 
@@ -215,6 +216,31 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
       },
     });
 
+  // Ananya (Tutor Active Learner)
+  await db
+    .insert(users)
+    .values({
+      id: ananyaId,
+      role: "student",
+      orgId,
+      cohortId,
+      displayName: "Ananya",
+      username: "ananya",
+      pinHash: hashPin("555555"),
+      status: "active",
+      avatar: { color: "blue", icon: "book" },
+      settings: {},
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        displayName: "Ananya",
+        username: "ananya",
+        pinHash: hashPin("555555"),
+        status: "active",
+      },
+    });
+
   // 5. Consent Records
   const consentMeeraId = "con_01J00000000000000000000001";
   await db
@@ -239,6 +265,20 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
       scope: "core_learning",
       method: "school_paper",
       evidenceRef: "CONSENT-PAPER-AARAV-2026",
+      recordedBy: teacherId,
+      grantedAt: new Date("2026-10-01T09:00:00.000Z"),
+    })
+    .onConflictDoNothing();
+
+  const consentAnanyaId = "con_01J00000000000000000000003";
+  await db
+    .insert(consentRecords)
+    .values({
+      id: consentAnanyaId,
+      studentId: ananyaId,
+      scope: "core_learning",
+      method: "school_paper",
+      evidenceRef: "CONSENT-PAPER-ANANYA-2026",
       recordedBy: teacherId,
       grantedAt: new Date("2026-10-01T09:00:00.000Z"),
     })
@@ -269,6 +309,25 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
     .insert(studentState)
     .values({
       studentId: aaravId,
+      stateVersion: 1,
+      focusConceptId: "MATH-FRAC-PART",
+      startConceptId: "MATH-FRAC-PART",
+      quickCheckDoneAt: new Date("2026-11-13T09:30:00.000Z"),
+      sparksTotal: 10,
+    })
+    .onConflictDoUpdate({
+      target: studentState.studentId,
+      set: {
+        focusConceptId: "MATH-FRAC-PART",
+        startConceptId: "MATH-FRAC-PART",
+        sparksTotal: 10,
+      },
+    });
+
+  await db
+    .insert(studentState)
+    .values({
+      studentId: ananyaId,
       stateVersion: 1,
       focusConceptId: "MATH-FRAC-PART",
       startConceptId: "MATH-FRAC-PART",

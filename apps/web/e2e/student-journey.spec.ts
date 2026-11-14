@@ -129,4 +129,52 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     // 4. AnswerPad and Question are rendered
     await expect(page.locator("button:has-text('Check Answer')")).toBeVisible();
   });
+
+  test("S5: Interactive AI Maths Tutor provides progressive disclosure and concept guidance", async ({
+    page,
+  }) => {
+    // 1. Sign in as Ananya
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "ananya");
+    await page.fill("#pin", "555555");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Launch learning session
+    await page.click("button:has-text('Continue Learning')");
+    await expect(page).toHaveURL(/\/session/);
+
+    // 3. Open Tutor Panel
+    const tutorToggleBtn = page.getByTestId("toggle-tutor-btn");
+    await expect(tutorToggleBtn).toBeVisible();
+    await tutorToggleBtn.click();
+
+    // 4. Verify Tutor header and guidance notice
+    await expect(page.getByText("Gaps AI Maths Tutor")).toBeVisible();
+    await expect(page.getByText("Guidance Only")).toBeVisible();
+    await expect(page.getByText(/tutor turns remaining/i)).toBeVisible();
+
+    // 5. Click Quick Action: "Give me a hint"
+    const hintBtn = page.getByTestId("tutor-quick-hint");
+    await expect(hintBtn).toBeVisible();
+    await hintBtn.click();
+
+    // Verify conversation thread displays assistant reply
+    const thread = page.getByTestId("tutor-conversation-thread");
+    await expect(thread).toBeVisible();
+    await expect(thread.getByText("Gaps Tutor")).toBeVisible();
+
+    // 6. Send conceptual free-text question: "What is the denominator?"
+    const inputField = page.getByTestId("tutor-input-field");
+    await inputField.fill("What is the denominator?");
+    await page.getByTestId("tutor-send-btn").click();
+
+    // Verify tutor answers explaining denominator
+    await expect(thread.getByText(/denominator is the bottom number/i)).toBeVisible();
+
+    // 7. Verification: Submit answer on the actual AnswerPad
+    const checkAnswerBtn = page.locator("button:has-text('Check Answer')");
+    await expect(checkAnswerBtn).toBeVisible();
+  });
 });

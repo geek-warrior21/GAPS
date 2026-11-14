@@ -12,6 +12,7 @@ import type {
 import { RichTextViewer } from "../math/RichTextViewer";
 import { AnswerPad } from "../math/AnswerPad";
 import { VisualViewer } from "../visuals/VisualViewer";
+import { TutorPanel } from "./TutorPanel";
 
 interface SessionPlayerProps {
   session: LearningSessionDto;
@@ -44,6 +45,7 @@ export function SessionPlayer({
   } | null>(null);
   const [isLoadingHelp, setIsLoadingHelp] = useState(false);
   const [currentRung, setCurrentRung] = useState(0);
+  const [isTutorOpen, setIsTutorOpen] = useState(false);
 
   const handleAdvance = async () => {
     setIsAdvancing(true);
@@ -415,6 +417,14 @@ export function SessionPlayer({
           <div className="text-sm font-bold flex-1">{feedback}</div>
         </div>
       )}
+
+      {/* AI Maths Tutor Panel */}
+      <TutorPanel
+        sessionId={session.id}
+        isOpen={isTutorOpen}
+        onToggle={() => setIsTutorOpen((prev) => !prev)}
+        lastOutcome={lastOutcome}
+      />
 
       {/* Help / Teaching Support Drawer */}
       {activeHelp && (
