@@ -105,4 +105,28 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page.getByText(/Consent Needed|Parent Consent Needed/i)).toBeVisible();
     await expect(page.getByText(/Ask your teacher about.*consent form/i)).toBeVisible();
   });
+
+  test("S4: Diagnostic assessment launches, adapts, and presents diagnostic items", async ({
+    page,
+  }) => {
+    // 1. Sign in as Aarav
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "aarav");
+    await page.fill("#pin", "121212");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Click Diagnostic Check
+    const diagButton = page.locator("button:has-text('Diagnostic Check')");
+    await expect(diagButton).toBeVisible();
+    await diagButton.click();
+
+    // 3. Reaches diagnostic session
+    await expect(page).toHaveURL(/\/session.*mode=diagnostic/);
+    await expect(page.getByText(/diagnostic session/i)).toBeVisible();
+
+    // 4. AnswerPad and Question are rendered
+    await expect(page.locator("button:has-text('Check Answer')")).toBeVisible();
+  });
 });

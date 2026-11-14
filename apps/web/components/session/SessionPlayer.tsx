@@ -35,6 +35,7 @@ export function SessionPlayer({
   const [lastOutcome, setLastOutcome] = useState<SubmitAttemptResponse["outcome"] | null>(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [sparksEarned, setSparksEarned] = useState(0);
+  const [isAdvancing, setIsAdvancing] = useState(false);
 
   // Help drawer state
   const [activeHelp, setActiveHelp] = useState<{
@@ -43,6 +44,28 @@ export function SessionPlayer({
   } | null>(null);
   const [isLoadingHelp, setIsLoadingHelp] = useState(false);
   const [currentRung, setCurrentRung] = useState(0);
+
+  const handleAdvance = async () => {
+    setIsAdvancing(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/v1/sessions/${session.id}/advance`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.step) {
+          setCurrentStep(data.step);
+        }
+      } else {
+        setFeedback("Failed to load next question. Please try again.");
+      }
+    } catch {
+      setFeedback("Network error. Please check your connection.");
+    } finally {
+      setIsAdvancing(false);
+    }
+  };
 
   // Extract current item safely
   const item: ItemViewDto | null =
@@ -181,6 +204,137 @@ export function SessionPlayer({
           >
             Return to Dashboard →
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStep.kind === "explanation") {
+    const routeTitles: Record<string, string> = {
+      picture: "Visual Model",
+      steps: "Step-by-step Method",
+      everyday: "Real-world Story",
+      rephrase: "Another Way to Think About It",
+    };
+
+    return (
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="p-6 bg-surface rounded-3xl border border-line shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-3 border-b border-line">
+            <div className="flex items-center gap-2">
+              <span className="w-8 h-8 rounded-full bg-accent/15 text-accent flex items-center justify-center font-bold text-sm">
+                💡
+              </span>
+              <div>
+                <h3 className="font-extrabold text-ink text-base">
+                  Let&apos;s look at this together
+                </h3>
+                <span className="text-xs font-bold text-muted uppercase tracking-wider">
+                  {routeTitles[currentStep.route] ?? "Concept Explanation"}
+                </span>
+              </div>
+            </div>
+            {onExit && (
+              <button
+                type="button"
+                onClick={onExit}
+                className="text-muted hover:text-ink text-sm font-bold"
+              >
+                ✕ Exit
+              </button>
+            )}
+          </div>
+
+          {currentStep.visual && (
+            <div className="p-4 bg-surface-2 rounded-2xl border border-line flex justify-center">
+              <VisualViewer visual={currentStep.visual} />
+            </div>
+          )}
+
+          <div className="p-4 bg-surface-2/60 rounded-2xl text-ink text-base leading-relaxed">
+            <RichTextViewer segments={currentStep.body} />
+          </div>
+
+          {feedback && (
+            <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-sm font-semibold">
+              {feedback}
+            </div>
+          )}
+
+          <div className="pt-2">
+            <button
+              type="button"
+              disabled={isAdvancing}
+              onClick={handleAdvance}
+              className="w-full py-4 bg-primary text-white font-extrabold rounded-2xl hover:bg-primary-ink active:scale-98 transition-all shadow-xs flex items-center justify-center gap-2"
+            >
+              <span>{isAdvancing ? "Loading question…" : "I understand! Try a question →"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStep.kind === "worked_example") {
+    return (
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="p-6 bg-surface rounded-3xl border border-line shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-3 border-b border-line">
+            <div className="flex items-center gap-2">
+              <span className="w-8 h-8 rounded-full bg-teal/15 text-teal flex items-center justify-center font-bold text-sm">
+                📝
+              </span>
+              <div>
+                <h3 className="font-extrabold text-ink text-base">Worked Example</h3>
+                <span className="text-xs font-bold text-muted uppercase tracking-wider">
+                  Follow along step-by-step
+                </span>
+              </div>
+            </div>
+            {onExit && (
+              <button
+                type="button"
+                onClick={onExit}
+                className="text-muted hover:text-ink text-sm font-bold"
+              >
+                ✕ Exit
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {currentStep.steps.map((stepSegments, idx) => (
+              <div key={idx} className="p-3 bg-surface-2 rounded-xl text-ink text-sm flex gap-3">
+                <span className="font-extrabold text-primary">{idx + 1}.</span>
+                <div>
+                  <RichTextViewer segments={stepSegments} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-3 bg-accent/10 border border-accent/30 rounded-xl text-ink text-sm font-bold flex items-center gap-2">
+            <span>Result:</span>
+            <RichTextViewer segments={currentStep.result} />
+          </div>
+
+          {feedback && (
+            <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-sm font-semibold">
+              {feedback}
+            </div>
+          )}
+
+          <div className="pt-2">
+            <button
+              type="button"
+              disabled={isAdvancing}
+              onClick={handleAdvance}
+              className="w-full py-4 bg-primary text-white font-extrabold rounded-2xl hover:bg-primary-ink active:scale-98 transition-all shadow-xs flex items-center justify-center gap-2"
+            >
+              <span>{isAdvancing ? "Loading question…" : "Now try one yourself →"}</span>
+            </button>
+          </div>
         </div>
       </div>
     );

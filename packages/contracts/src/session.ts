@@ -16,6 +16,7 @@ export const SessionModeSchema = z.enum([
   "boss",
   "quick_check",
   "solve_followup",
+  "diagnostic",
 ]);
 export type SessionMode = z.infer<typeof SessionModeSchema>;
 

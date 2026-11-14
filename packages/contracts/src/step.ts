@@ -98,7 +98,7 @@ export const StepSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("item"),
     stepSeq: z.number().int().nonnegative(),
-    context: z.enum(["learn", "review", "quest", "boss", "quick_check"]),
+    context: z.enum(["learn", "review", "quest", "boss", "quick_check", "diagnostic"]),
     item: ItemViewSchema,
     help: z.array(z.enum(["hint", "explain", "worked_example"])),
     preShownHint: RichTextSchema.optional(),

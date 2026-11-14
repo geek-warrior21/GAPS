@@ -72,7 +72,8 @@ export type BeliefStatus =
 
 export type Reliability = "missing" | "stale" | "conflicting" | "supported";
 
-export type AttemptMode = "learn" | "review" | "quest" | "boss" | "quick_check" | "solve_followup";
+export type AttemptMode =
+  "learn" | "review" | "quest" | "boss" | "quick_check" | "solve_followup" | "diagnostic";
 
 export type AttemptOutcome = "correct" | "incorrect" | "unparseable" | "not_simplified";
 

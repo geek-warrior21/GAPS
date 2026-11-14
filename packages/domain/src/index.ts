@@ -143,4 +143,27 @@ export {
   type SparkKind,
   type WeeklyRhythm,
 } from "./sparks";
+export {
+  DEFAULT_DIAGNOSTIC_MAX_ITEMS,
+  createDiagnostic,
+  projectDiagnosticBeliefs,
+  stepDiagnostic,
+  type CreateDiagnosticOptions,
+  type DiagnosticItemResult,
+  type DiagnosticState,
+} from "./diagnostic";
+export {
+  detectHeuristicMisconceptions,
+  detectMisconception,
+  reconcileActiveMisconceptions,
+  type AttemptMisconceptionEvidence,
+  type MisconceptionConfidence,
+  type MisconceptionDetectionResult,
+} from "./misconception-tracker";
+export {
+  getRemediationRouteForMisconception,
+  selectAdaptiveActivity,
+  type AdaptiveDecision,
+  type AdaptiveSelectionInput,
+} from "./policy/adaptive-selector";
 export { buildComebackCard, type ComebackCardData } from "./comeback";

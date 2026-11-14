@@ -518,3 +518,69 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - Standalone Next.js server serves static assets after copying `.next/static` into `.next/standalone/apps/web/.next/static`.
 - Cookie security flag is relaxed in non-HTTPS testing mode when `PLAYWRIGHT_TEST=1` is set.
 - Meera (`DEMO7A / meera / 333333`) serves as the primary demo inspection account; Aarav (`DEMO7A / aarav / 121212`) practices active attempts; Kabir (`DEMO7A / kabir / 444444`) tests parent consent gating.
+
+---
+
+## 2026-11-14 — Phase 7: Adaptive Learning Intelligence, Diagnostic Engine, Misconception Detection & Remediation
+
+### Built
+
+- **Workstream A: Diagnostic Assessment Engine (`packages/domain/src/diagnostic.ts`):**
+  - `createDiagnostic`: Initializes diagnostic probe at grade entry point (`Grade 6 -> MATH-FRAC-PART`, `Grade 7 -> MATH-FRAC-EQUIV`, `Grade 8 -> MATH-FRAC-ADDUNLIKE`), skipping concepts with existing sufficient evidence.
+  - `stepDiagnostic`: Adaptive DAG traversal:
+    - On correct response: advances downstream along topological order to assess higher-level skills.
+    - On incorrect response: steps back to unassessed foundational prerequisite to identify root knowledge gaps.
+    - Bounded by max items (default 7 items) and terminates gracefully when frontier is resolved.
+  - `projectDiagnosticBeliefs`: Computes student knowledge gap map (`gaps` -> `needs_support`, `strengths` -> `developing`, untested -> `not_assessed`) with measurement reliability.
+  - Persists diagnostic session state in `session.counters.diagnosticState` for interrupted session recovery.
+  - On diagnostic completion: updates `concept_beliefs`, sets `studentState.focusConceptId` and `startConceptId` to `recommendedStartConceptId`, and marks session completed.
+
+- **Workstream B: Misconception Detection & Confidence Tracking (`packages/domain/src/misconception-tracker.ts`):**
+  - `detectMisconception`: Multi-candidate pattern matching combining explicit template predictions and domain arithmetic heuristics (`detectHeuristicMisconceptions`).
+  - Strict evidence accumulation and confidence tiers:
+    - 1 evidence: `low` (hypothesis, never treated as definitive proof).
+    - 2 occurrences: `medium` (recurring pattern identified).
+    - 3+ occurrences: `high` (systematic misconception confirmed).
+    - Returns `unclassified` for unrecognized errors.
+  - `reconcileActiveMisconceptions`:
+    - Clears active misconceptions upon independent success.
+    - Promotes to `activeMisconceptionIds` in `concept_beliefs` when recurring (`medium` or `high`).
+
+- **Workstream C: Adaptive Activity Selector (`packages/domain/src/policy/adaptive-selector.ts`):**
+  - `selectAdaptiveActivity`: Next-activity decision engine accounting for current belief status, prerequisite readiness, recent attempt history, active misconceptions, and template exposure history (filtering out the last 3 templates).
+  - Target difficulty calibration (difficulty 1 for struggle/scaffolding, difficulty 2 for standard practice, difficulty 3 for challenge/high mastery).
+  - Selects teaching actions: `INDEPENDENT_PRACTICE`, `REVIEW_PREREQUISITE`, `EXPLAIN`, `WORKED_EXAMPLE`, `RETRIEVAL_REVIEW`, and `ADVANCE`.
+
+- **Workstream D: Targeted Pedagogical Remediation (`packages/domain/src/policy/adaptive-selector.ts`, `apps/web/server/session/engine.ts`):**
+  - `getRemediationRouteForMisconception`: Maps specific misconceptions to pedagogical routes:
+    - Spatial and denominator misconceptions (e.g. `MC-ADD-ACROSS`, `MC-PART-RATIO`, `MC-BIGGER-DENOM`) -> `picture` route with SVG visual models (fraction bars, number lines, area models).
+    - Algorithmic and procedural misconceptions (e.g. `MC-EQUIV-ADDITIVE`, `MC-MIXED-ADD-PARTS`, `MC-SUB-ACROSS`) -> `steps` route.
+    - Conceptual meaning misconceptions -> `everyday` route.
+  - Escalation ladder: first struggle triggers targeted `EXPLAIN` with visual models; repeated struggle escalates to `WORKED_EXAMPLE`.
+  - INVARIANT §3 strictly preserved: viewing explanations and worked examples awards 0 sparks and never promotes mastery status.
+
+- **Workstream E & F: Student Experience Integration & API (`apps/web/`):**
+  - `SessionPlayer.tsx`:
+    - Full support for `kind: "explanation"` steps rendering visual models, explanation body, route badge, and "I understand! Try a question →" action.
+    - Full support for `kind: "worked_example"` steps rendering step-by-step breakdown and final result.
+    - Misconception tips in feedback banners offering helpful guidance (never "wrong" or "failed", per INVARIANT §9 & §10).
+  - API endpoint: `POST /api/v1/sessions/[sessionId]/advance` to smoothly transition from remediation steps to follow-up practice items.
+  - `home/page.tsx`: Added "Take Diagnostic Check" action alongside "Continue Learning" to launch grade-level diagnostic assessment.
+  - `session/page.tsx`: Added `mode: "diagnostic"` support.
+  - Interrupted session recovery: `GET /sessions/{id}` seamlessly resumes active sessions (both learn and diagnostic).
+
+- **Testing Suite:**
+  - `packages/domain/src/diagnostic.test.ts`: 6 unit tests for diagnostic initialization, DAG traversal, step back, and belief projection.
+  - `packages/domain/src/misconception-tracker.test.ts`: 6 unit tests for template matching, heuristic detection, evidence accumulation, and reconciliation.
+  - `packages/domain/src/policy/adaptive-selector.test.ts`: 7 unit tests covering all adaptive activity decisions.
+  - `apps/web/server/session.test.ts`: 13 comprehensive integration tests including end-to-end diagnostic session and adaptive remediation with advance step.
+  - `apps/web/e2e/student-journey.spec.ts`: Scenario S4 testing diagnostic launch, DAG adaptation, and question rendering in Playwright (both desktop and mobile).
+
+### Verification Results
+
+- `pnpm verify`: 100% green exit code 0.
+- Unit & integration tests: **34 test files, 230 tests passed**.
+- Playwright E2E: **8 tests passed across Desktop and Mobile Chromium**.
+- Content validation: `content:check` verified 42 templates across 500 seeds each.
+- Database: PostgreSQL 16 verified healthy; migrations and seeds idempotent.
+- Next.js build: Standalone production build compiled successfully.

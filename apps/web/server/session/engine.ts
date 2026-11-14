@@ -9,19 +9,29 @@ import {
 } from "@gaps/content";
 import {
   type AnswerSpec,
+  type Belief,
   type CheckedAttempt,
   type ConceptId,
+  type DiagnosticState,
   type MisconceptionId,
   type MisconceptionMap,
   type MisconceptionValue,
   type RationalAcceptKind,
   type RationalForm,
   type TeachingAction,
+  MISCONCEPTION_CATALOG,
+  POLICY_VERSION,
   buildComebackCard,
+  createDiagnostic,
   createRng,
+  detectMisconception,
   makeId,
+  projectDiagnosticBeliefs,
   rational,
+  reconcileActiveMisconceptions,
   replayTransitions,
+  selectAdaptiveActivity,
+  stepDiagnostic,
   toIstDateString,
   toPublicBelief,
   verify,
@@ -34,6 +44,8 @@ import {
   getItemInstance,
   type DbClient,
   attempts,
+  cohorts,
+  users,
 } from "@gaps/db";
 import { and, eq } from "drizzle-orm";
 import type {
@@ -130,6 +142,15 @@ export function deserializeMisconceptions(raw: unknown): MisconceptionMap {
   return map;
 }
 
+async function getStudentGrade(db: DbClient, studentId: string): Promise<number> {
+  const user = await db.select().from(users).where(eq(users.id, studentId)).limit(1);
+  if (user[0]?.cohortId) {
+    const cohort = await db.select().from(cohorts).where(eq(cohorts.id, user[0].cohortId)).limit(1);
+    if (cohort[0]?.grade) return cohort[0].grade;
+  }
+  return 6;
+}
+
 function findTemplatesForConcept(conceptId: string): readonly Template<unknown>[] {
   const matching = TEMPLATES.filter((t) => t.conceptId === conceptId);
   if (matching.length === 0) {
@@ -143,11 +164,23 @@ export async function createStepFromItem(
   conceptId: ConceptId,
   stepSeq: number,
   preferredTemplateId?: string,
+  context: "learn" | "review" | "quest" | "boss" | "quick_check" | "diagnostic" = "learn",
+  targetDiff?: 1 | 2 | 3,
 ): Promise<{ itemInstanceId: string; step: StepDto }> {
   const templates = findTemplatesForConcept(conceptId);
-  const template =
-    (preferredTemplateId ? templates.find((t) => t.id === preferredTemplateId) : undefined) ??
-    templates[Math.floor(Math.random() * templates.length)]!;
+  let template: Template<unknown>;
+  if (preferredTemplateId) {
+    const found = templates.find((t) => t.id === preferredTemplateId);
+    template = found ?? templates[Math.floor(Math.random() * templates.length)]!;
+  } else if (targetDiff !== undefined) {
+    const matchingDiff = templates.filter((t) => t.difficulty === targetDiff);
+    template =
+      matchingDiff.length > 0
+        ? matchingDiff[Math.floor(Math.random() * matchingDiff.length)]!
+        : templates[Math.floor(Math.random() * templates.length)]!;
+  } else {
+    template = templates[Math.floor(Math.random() * templates.length)]!;
+  }
 
   const seed = Math.floor(Math.random() * 100000) + 1;
   const gen = generateItem(template, seed);
@@ -170,7 +203,7 @@ export async function createStepFromItem(
   const step: StepDto = {
     kind: "item",
     stepSeq,
-    context: "learn",
+    context,
     item: {
       id: createdItem.id,
       conceptId,
@@ -194,6 +227,52 @@ export async function startLearningSession(
   // Abandon any previous active learning session (invariant: only 1 active session)
   await studentRepo.abandonActiveSessions();
 
+  if (options.mode === "diagnostic") {
+    const rawGrade = await getStudentGrade(db, studentId);
+    const grade: 6 | 7 | 8 = rawGrade === 7 || rawGrade === 8 ? rawGrade : 6;
+    const existingBeliefsList = await studentRepo.getConceptBeliefs();
+    const existingBeliefs: Partial<Record<ConceptId, Belief["status"]>> = {};
+    for (const b of existingBeliefsList) {
+      existingBeliefs[b.conceptId as ConceptId] = b.status as Belief["status"];
+    }
+
+    const diag = createDiagnostic({ grade, existingBeliefs });
+    const focusConceptId: ConceptId = diag.currentConceptId ?? "MATH-FRAC-PART";
+
+    const { step } = await createStepFromItem(db, focusConceptId, 1, undefined, "diagnostic");
+    const sessionId = generateDomainId("session");
+    const createdSession = await studentRepo.createSession({
+      id: sessionId,
+      mode: "diagnostic",
+      focusConceptId,
+      status: "active",
+      budgetS: options.budgetS ?? 900,
+      stepSeq: 1,
+      currentStep: serializeForDb(step) as Record<string, unknown>,
+      counters: {
+        diagnosticState: diag,
+        completedSteps: 0,
+        correctN: 0,
+      },
+    });
+
+    const sessionDto: LearningSessionDto = {
+      id: createdSession.id,
+      studentId: createdSession.studentId,
+      mode: "diagnostic",
+      focusConceptId,
+      status: "active",
+      budgetS: createdSession.budgetS,
+      stepSeq: createdSession.stepSeq,
+      startedAt: createdSession.startedAt.toISOString(),
+    };
+
+    return {
+      session: sessionDto,
+      initialStep: step,
+    };
+  }
+
   // Determine focus concept
   let focusConceptId = options.focusConceptId;
   if (!focusConceptId) {
@@ -202,7 +281,8 @@ export async function startLearningSession(
   }
 
   // Generate initial step
-  const { step } = await createStepFromItem(db, focusConceptId, 1);
+  const context = options.mode === "review" ? "review" : "learn";
+  const { step } = await createStepFromItem(db, focusConceptId, 1, undefined, context);
 
   const sessionId = generateDomainId("session");
   const createdSession = await studentRepo.createSession({
@@ -213,7 +293,15 @@ export async function startLearningSession(
     budgetS: options.budgetS,
     stepSeq: 1,
     currentStep: serializeForDb(step) as Record<string, unknown>,
-    counters: { completedSteps: 0, correctN: 0 },
+    counters: {
+      completedSteps: 0,
+      correctN: 0,
+      consecutiveIndependentCorrect: 0,
+      consecutiveIncorrect: 0,
+      remediationCount: 0,
+      recentTemplateIds: [],
+      prereqRouteTaken: false,
+    },
   });
 
   const sessionDto: LearningSessionDto = {
@@ -272,13 +360,48 @@ export async function processSessionAttempt(
   const answerSpec = deserializeAnswerSpec(item.answer);
   const misconceptions = deserializeMisconceptions(item.misconceptionAnswers);
 
-  // 3. Exact Verification (BigInt Rational)
+  // 3. Exact Verification (BigInt Rational) & Misconception Detection
   const verifyResult = verify(answerSpec, payload.rawAnswer, misconceptions);
   const outcome = verifyResult.outcome;
-  const misconceptionId = verifyResult.misconceptionId ?? null;
 
-  // Try again rule: if first try was incorrect, student gets a second try before resolution
-  const isResolved = outcome === "correct" || payload.tryNo >= 2 || outcome === "unparseable";
+  const allStudentAttempts = await studentRepo.getAllAttempts();
+  const conceptAttempts = allStudentAttempts.filter((a) => a.conceptId === conceptId);
+
+  let candidateVal: MisconceptionValue = payload.rawAnswer;
+  if (verifyResult.parsed) {
+    const val = verifyResult.parsed.value;
+    if (typeof val === "string") {
+      candidateVal = val;
+    } else if (val && typeof val === "object" && "n" in val && "d" in val) {
+      candidateVal = val as MisconceptionValue;
+    }
+  }
+
+  let correctVal: MisconceptionValue = rational(1n, 1n);
+  if (answerSpec.kind === "order") {
+    correctVal = answerSpec.value[0] ?? payload.rawAnswer;
+  } else {
+    correctVal = answerSpec.value;
+  }
+
+  const detection = detectMisconception(
+    conceptId,
+    candidateVal,
+    correctVal,
+    misconceptions,
+    conceptAttempts.map((a) => ({
+      outcome: a.outcome as "correct" | "incorrect" | "unparseable" | "not_simplified",
+      misconceptionId: a.misconceptionId ? (a.misconceptionId as MisconceptionId) : undefined,
+    })),
+    payload.rawAnswer,
+  );
+
+  const misconceptionId = detection.primaryMisconceptionId ?? verifyResult.misconceptionId ?? null;
+
+  // In diagnostic mode, evaluate every item directly on first try without blocking
+  const isDiagnostic = session.mode === "diagnostic";
+  const isResolved =
+    isDiagnostic || outcome === "correct" || payload.tryNo >= 2 || outcome === "unparseable";
   const tryAgain = !isResolved && payload.tryNo === 1;
 
   // 4. Record Attempt
@@ -306,13 +429,12 @@ export async function processSessionAttempt(
   let updatedBelief: ReturnType<typeof toPublicBelief> | undefined;
   let comebackCardDto: ComebackCardDto | null = null;
   let sparksAwarded = 0;
+  let reconciledMisconceptions: readonly MisconceptionId[] = [];
 
-  if (isResolved) {
+  if (isResolved && !isDiagnostic) {
     // Replay authoritative transitions for this concept over all stored attempts
-    const allStudentAttempts = await studentRepo.getAllAttempts();
-    const conceptAttempts: CheckedAttempt[] = allStudentAttempts
-      .filter((a) => a.conceptId === conceptId)
-      .map((a) => ({
+    const updatedAttempts: CheckedAttempt[] = [
+      ...conceptAttempts.map((a) => ({
         attemptId: a.id,
         studentId: a.studentId,
         sessionId: a.sessionId,
@@ -326,11 +448,29 @@ export async function processSessionAttempt(
         assistance: (a.assistanceLevel as CheckedAttempt["assistance"]) ?? 0,
         tryNo: (a.tryNo as CheckedAttempt["tryNo"]) ?? 1,
         isReview: a.isReview,
-        verifierVersion: "verify-1.0",
+        verifierVersion: (a.verifierVersion as "verify-1.0") || "verify-1.0",
         at: a.createdAt.toISOString(),
-      }));
+      })),
+      {
+        attemptId,
+        studentId,
+        sessionId,
+        clientAttemptId: payload.clientAttemptId,
+        itemInstanceId: item.id,
+        templateId: item.templateId,
+        conceptId,
+        mode: session.mode as CheckedAttempt["mode"],
+        outcome: outcome as CheckedAttempt["outcome"],
+        misconceptionId: misconceptionId ? (misconceptionId as MisconceptionId) : undefined,
+        assistance: (payload.assistanceLevel as CheckedAttempt["assistance"]) ?? 0,
+        tryNo: (payload.tryNo as CheckedAttempt["tryNo"]) ?? 1,
+        isReview: session.mode === "review",
+        verifierVersion: (verifyResult.verifierVersion as "verify-1.0") || "verify-1.0",
+        at: new Date().toISOString(),
+      },
+    ];
 
-    const transitionHistory = replayTransitions(conceptId, conceptAttempts, {
+    const transitionHistory = replayTransitions(conceptId, updatedAttempts, {
       templatesForConcept: 3,
     });
     const newState = transitionHistory.state;
@@ -338,6 +478,13 @@ export async function processSessionAttempt(
 
     // Persist updated belief
     const existingBelief = await studentRepo.getConceptBelief(conceptId);
+    reconciledMisconceptions = reconcileActiveMisconceptions(
+      (existingBelief?.activeMisconceptionIds as MisconceptionId[]) ?? [],
+      detection,
+      outcome === "correct",
+      payload.assistanceLevel === 0,
+    );
+
     await studentRepo.upsertConceptBelief({
       studentId,
       conceptId,
@@ -350,9 +497,9 @@ export async function processSessionAttempt(
         ? new Date(newState.firstNeedsSupportAt)
         : null,
       lastEvidenceAt: new Date(),
-      activeMisconceptionIds: [...newState.activeMisconceptionIds],
-      independentN: conceptAttempts.filter((a) => a.assistance === 0).length,
-      independentCorrectN: conceptAttempts.filter(
+      activeMisconceptionIds: [...reconciledMisconceptions],
+      independentN: updatedAttempts.filter((a) => a.assistance === 0).length,
+      independentCorrectN: updatedAttempts.filter(
         (a) => a.assistance === 0 && a.outcome === "correct",
       ).length,
     });
@@ -397,7 +544,7 @@ export async function processSessionAttempt(
         firstNeedsSupportAt: newState.firstNeedsSupportAt,
         achievedAt: new Date().toISOString(),
         demonstratedAt: newState.demonstratedAt,
-        history: conceptAttempts,
+        history: updatedAttempts,
       });
 
       if (comebackData) {
@@ -434,12 +581,36 @@ export async function processSessionAttempt(
   let nextStep: StepDto | null = null;
   let sessionCompleted = false;
 
-  const currentCounters = (session.counters as Record<string, number> | null) ?? {};
+  const currentCounters = (session.counters as Record<string, unknown> | null) ?? {};
   const completedSteps = isResolved
-    ? (currentCounters.completedSteps ?? 0) + 1
-    : (currentCounters.completedSteps ?? 0);
+    ? ((currentCounters.completedSteps as number) ?? 0) + 1
+    : ((currentCounters.completedSteps as number) ?? 0);
   const correctN =
-    outcome === "correct" ? (currentCounters.correctN ?? 0) + 1 : (currentCounters.correctN ?? 0);
+    outcome === "correct"
+      ? ((currentCounters.correctN as number) ?? 0) + 1
+      : ((currentCounters.correctN as number) ?? 0);
+
+  const consecutiveIndependentCorrect =
+    outcome === "correct" && payload.assistanceLevel === 0
+      ? ((currentCounters.consecutiveIndependentCorrect as number) ?? 0) + 1
+      : outcome === "incorrect"
+        ? 0
+        : ((currentCounters.consecutiveIndependentCorrect as number) ?? 0);
+
+  const consecutiveIncorrect =
+    outcome === "incorrect"
+      ? ((currentCounters.consecutiveIncorrect as number) ?? 0) + 1
+      : outcome === "correct"
+        ? 0
+        : ((currentCounters.consecutiveIncorrect as number) ?? 0);
+
+  let remediationCount = (currentCounters.remediationCount as number) ?? 0;
+  const recentTemplateIds = [...((currentCounters.recentTemplateIds as string[]) ?? [])];
+  if (item.templateId && !recentTemplateIds.includes(item.templateId)) {
+    recentTemplateIds.push(item.templateId);
+    if (recentTemplateIds.length > 3) recentTemplateIds.shift();
+  }
+  const prereqRouteTaken = (currentCounters.prereqRouteTaken as boolean) ?? false;
 
   // Feedback student copy (never "wrong" or "failed", says "not yet!")
   let feedback = "Spot on! That's correct.";
@@ -448,9 +619,13 @@ export async function processSessionAttempt(
   } else if (outcome === "unparseable") {
     feedback = "Not quite clear! Check your answer format and try again.";
   } else if (outcome === "incorrect") {
-    feedback = tryAgain
-      ? "Not yet! Take another look and give it another try."
-      : "Not yet! Let's see how this one works and move forward.";
+    if (tryAgain) {
+      feedback = "Not yet! Take another look and give it another try.";
+    } else if (misconceptionId && MISCONCEPTION_CATALOG[misconceptionId]) {
+      feedback = `Not yet! Tip: ${MISCONCEPTION_CATALOG[misconceptionId].pattern}. Let's keep going.`;
+    } else {
+      feedback = "Not yet! Let's see how this one works and move forward.";
+    }
   }
 
   if (tryAgain) {
@@ -463,27 +638,290 @@ export async function processSessionAttempt(
       message: [{ t: "text", v: feedback }],
       item: currentItem,
     };
-  } else if (completedSteps >= 5) {
-    // Session completion condition
-    teachingAction = "ADVANCE";
-    sessionCompleted = true;
-    await studentRepo.updateSession(sessionId, {
-      status: "completed",
-      endedAt: new Date(),
-      counters: { completedSteps, correctN },
+  } else if (isDiagnostic) {
+    const rawDiag = currentCounters.diagnosticState as DiagnosticState;
+    const nextDiagState = stepDiagnostic(rawDiag, {
+      correct: outcome === "correct",
+      misconceptionId: misconceptionId ?? undefined,
     });
-  } else {
-    // Generate next item
-    const nextSeq = session.stepSeq + 1;
-    const { step } = await createStepFromItem(db, conceptId, nextSeq);
-    nextStep = step;
-    teachingAction = "INDEPENDENT_PRACTICE";
 
-    await studentRepo.updateSession(sessionId, {
-      stepSeq: nextSeq,
-      currentStep: serializeForDb(step) as Record<string, unknown>,
-      counters: { completedSteps, correctN },
+    if (nextDiagState.done) {
+      teachingAction = "ADVANCE";
+      sessionCompleted = true;
+      nextStep = null;
+
+      // Project beliefs and save
+      const projections = projectDiagnosticBeliefs(nextDiagState);
+      for (const [projConceptId, proj] of Object.entries(projections) as [
+        ConceptId,
+        { status: Belief["status"]; reliability: Belief["reliability"] },
+      ][]) {
+        await studentRepo.upsertConceptBelief({
+          studentId,
+          conceptId: projConceptId,
+          status: proj.status,
+          reliability: proj.reliability,
+          estimate: null,
+          activeMisconceptionIds: [],
+          lastEvidenceAt: new Date(),
+        });
+      }
+
+      const recStart: ConceptId = nextDiagState.recommendedStartConceptId ?? "MATH-FRAC-PART";
+      await studentRepo.updateStudentState({
+        focusConceptId: recStart,
+        startConceptId: recStart,
+      });
+
+      await studentRepo.updateSession(sessionId, {
+        status: "completed",
+        endedAt: new Date(),
+        counters: {
+          ...currentCounters,
+          diagnosticState: nextDiagState,
+          completedSteps,
+          correctN,
+        },
+      });
+    } else {
+      const nextSeq = session.stepSeq + 1;
+      const nextConcept: ConceptId = nextDiagState.currentConceptId ?? "MATH-FRAC-PART";
+      const { step } = await createStepFromItem(db, nextConcept, nextSeq, undefined, "diagnostic");
+      nextStep = step;
+      teachingAction = outcome === "correct" ? "ADVANCE" : "REVIEW_PREREQUISITE";
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(step) as Record<string, unknown>,
+        counters: {
+          ...currentCounters,
+          diagnosticState: nextDiagState,
+          completedSteps,
+          correctN,
+        },
+      });
+    }
+  } else {
+    // Adaptive Question Selection (Workstream C & D)
+    const existingBeliefs = await studentRepo.getConceptBeliefs();
+    const beliefMap = new Map<ConceptId, (typeof existingBeliefs)[0]>();
+    for (const b of existingBeliefs) {
+      beliefMap.set(b.conceptId as ConceptId, b);
+    }
+
+    const prereqEdges = EDGES.filter((e) => e.conceptId === conceptId);
+    const prerequisiteBeliefs: Belief[] = prereqEdges.map((e) => {
+      const b = beliefMap.get(e.prereqId as ConceptId);
+      return {
+        conceptId: e.prereqId as ConceptId,
+        status: (b?.status as Belief["status"]) ?? "not_assessed",
+        estimate: b?.estimate ? Number(b.estimate) : null,
+        reliability: (b?.reliability as Belief["reliability"]) ?? "unsupported",
+        demonstratedAt: b?.demonstratedAt ? b.demonstratedAt.toISOString() : null,
+        retainedAt: b?.retainedAt ? b.retainedAt.toISOString() : null,
+        firstNeedsSupportAt: b?.firstNeedsSupportAt ? b.firstNeedsSupportAt.toISOString() : null,
+        activeMisconceptionIds: (b?.activeMisconceptionIds as MisconceptionId[]) ?? [],
+        policyVersion: POLICY_VERSION,
+        version: 1,
+      };
     });
+
+    const currentBeliefObj: Belief = {
+      conceptId,
+      status:
+        updatedBelief?.status ??
+        (beliefMap.get(conceptId)?.status as Belief["status"]) ??
+        "not_assessed",
+      estimate: updatedBelief
+        ? 0.5
+        : beliefMap.get(conceptId)?.estimate
+          ? Number(beliefMap.get(conceptId)!.estimate)
+          : null,
+      reliability:
+        updatedBelief?.reliability ??
+        (beliefMap.get(conceptId)?.reliability as Belief["reliability"]) ??
+        "unsupported",
+      demonstratedAt:
+        updatedBelief?.demonstratedAt ??
+        (beliefMap.get(conceptId)?.demonstratedAt
+          ? beliefMap.get(conceptId)!.demonstratedAt!.toISOString()
+          : null),
+      retainedAt:
+        updatedBelief?.retainedAt ??
+        (beliefMap.get(conceptId)?.retainedAt
+          ? beliefMap.get(conceptId)!.retainedAt!.toISOString()
+          : null),
+      firstNeedsSupportAt:
+        updatedBelief?.firstNeedsSupportAt ??
+        (beliefMap.get(conceptId)?.firstNeedsSupportAt
+          ? beliefMap.get(conceptId)!.firstNeedsSupportAt!.toISOString()
+          : null),
+      activeMisconceptionIds: [...reconciledMisconceptions],
+      policyVersion: POLICY_VERSION,
+      version: 1,
+    };
+
+    const rng = createRng(Date.now() ^ 0xa5a5a5a5);
+    const candidateTemplates = findTemplatesForConcept(conceptId).map((t) => ({
+      id: t.id,
+      difficulty: t.difficulty,
+      reviewed: t.review.status === "reviewed",
+    }));
+
+    const adaptiveDecision = selectAdaptiveActivity(
+      {
+        focusConceptId: conceptId,
+        belief: currentBeliefObj,
+        prerequisiteBeliefs,
+        recentAttempts: conceptAttempts.map((a) => ({
+          conceptId: a.conceptId as ConceptId,
+          outcome: a.outcome as "correct" | "incorrect" | "unparseable" | "not_simplified",
+          assistance: a.assistanceLevel ?? 0,
+          tryNo: a.tryNo ?? 1,
+          misconceptionId: a.misconceptionId ?? undefined,
+        })),
+        consecutiveIndependentCorrect,
+        consecutiveIncorrect,
+        activeMisconceptions: reconciledMisconceptions,
+        recentTemplateIds,
+        remediationCount,
+        sessionMode: session.mode as "learn" | "review",
+        prereqRouteTaken,
+      },
+      candidateTemplates,
+      rng,
+    );
+
+    if (adaptiveDecision.sessionCompleted || completedSteps >= 5) {
+      teachingAction = "ADVANCE";
+      sessionCompleted = true;
+      nextStep = null;
+      await studentRepo.updateSession(sessionId, {
+        status: "completed",
+        endedAt: new Date(),
+        counters: {
+          completedSteps,
+          correctN,
+          consecutiveIndependentCorrect,
+          consecutiveIncorrect,
+          remediationCount,
+          recentTemplateIds,
+          prereqRouteTaken,
+        },
+      });
+    } else if (adaptiveDecision.action === "EXPLAIN") {
+      teachingAction = "EXPLAIN";
+      remediationCount += 1;
+      const route = adaptiveDecision.explanationRoute ?? "picture";
+      const exp = EXPLANATIONS[conceptId] ?? EXPLANATIONS["MATH-FRAC-PART"];
+      const nextSeq = session.stepSeq + 1;
+      nextStep = {
+        kind: "explanation",
+        stepSeq: nextSeq,
+        route,
+        body: [...exp[route]] as RichTextDto,
+        visual: (item.visual as VisualSpecDto) ?? undefined,
+        source: "authored",
+        then: "continue",
+      };
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(nextStep) as Record<string, unknown>,
+        counters: {
+          completedSteps,
+          correctN,
+          consecutiveIndependentCorrect,
+          consecutiveIncorrect,
+          remediationCount,
+          recentTemplateIds,
+          prereqRouteTaken,
+        },
+      });
+    } else if (adaptiveDecision.action === "WORKED_EXAMPLE") {
+      teachingAction = "WORKED_EXAMPLE";
+      remediationCount += 1;
+      const nextSeq = session.stepSeq + 1;
+      const stepsArr =
+        (item.workedExample as { steps?: RichTextDto[]; result?: RichTextDto })?.steps ?? [];
+      const resultObj = (item.workedExample as { steps?: RichTextDto[]; result?: RichTextDto })
+        ?.result ?? [{ t: "text", v: "Complete the steps." }];
+
+      nextStep = {
+        kind: "worked_example",
+        stepSeq: nextSeq,
+        steps: stepsArr,
+        result: resultObj,
+      };
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(nextStep) as Record<string, unknown>,
+        counters: {
+          completedSteps,
+          correctN,
+          consecutiveIndependentCorrect,
+          consecutiveIncorrect,
+          remediationCount,
+          recentTemplateIds,
+          prereqRouteTaken,
+        },
+      });
+    } else if (adaptiveDecision.action === "REVIEW_PREREQUISITE") {
+      teachingAction = "REVIEW_PREREQUISITE";
+      const nextSeq = session.stepSeq + 1;
+      const targetConceptId = adaptiveDecision.targetConceptId;
+      const { step } = await createStepFromItem(
+        db,
+        targetConceptId,
+        nextSeq,
+        adaptiveDecision.preferredTemplateId,
+        "learn",
+        adaptiveDecision.targetDifficulty,
+      );
+      nextStep = step;
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(step) as Record<string, unknown>,
+        counters: {
+          completedSteps,
+          correctN,
+          consecutiveIndependentCorrect,
+          consecutiveIncorrect,
+          remediationCount,
+          recentTemplateIds,
+          prereqRouteTaken: true,
+        },
+      });
+    } else {
+      // INDEPENDENT_PRACTICE
+      teachingAction = "INDEPENDENT_PRACTICE";
+      const nextSeq = session.stepSeq + 1;
+      const { step } = await createStepFromItem(
+        db,
+        conceptId,
+        nextSeq,
+        adaptiveDecision.preferredTemplateId,
+        "learn",
+        adaptiveDecision.targetDifficulty,
+      );
+      nextStep = step;
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(step) as Record<string, unknown>,
+        counters: {
+          completedSteps,
+          correctN,
+          consecutiveIndependentCorrect,
+          consecutiveIncorrect,
+          remediationCount,
+          recentTemplateIds,
+          prereqRouteTaken,
+        },
+      });
+    }
   }
 
   const sparksTotal = await studentRepo.getSparksTotal();
@@ -757,4 +1195,33 @@ export async function getGapMapData(
       notAssessedCount,
     },
   };
+}
+
+export async function advanceLearningSessionStep(
+  studentId: string,
+  sessionId: string,
+  db: DbClient = getDb(),
+): Promise<{ step: StepDto }> {
+  const studentRepo = createStudentRepo(studentId, db);
+  const session = await studentRepo.getSession(sessionId);
+  if (!session || session.status !== "active") {
+    throw new EngineError("Active session not found", 404);
+  }
+
+  const conceptId = (session.focusConceptId as ConceptId) || "MATH-FRAC-PART";
+  const nextSeq = session.stepSeq + 1;
+  const { step } = await createStepFromItem(
+    db,
+    conceptId,
+    nextSeq,
+    undefined,
+    session.mode as "learn",
+  );
+
+  await studentRepo.updateSession(sessionId, {
+    stepSeq: nextSeq,
+    currentStep: serializeForDb(step) as Record<string, unknown>,
+  });
+
+  return { step };
 }

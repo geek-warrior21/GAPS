@@ -60,7 +60,10 @@ export default function HomePage() {
     loadData();
   }, [router]);
 
-  const handleStartSession = (conceptId?: string, mode: "learn" | "review" = "learn") => {
+  const handleStartSession = (
+    conceptId?: string,
+    mode: "learn" | "review" | "diagnostic" = "learn",
+  ) => {
     const url = conceptId
       ? `/session?conceptId=${conceptId}&mode=${mode}`
       : `/session?mode=${mode}`;
@@ -180,7 +183,7 @@ export default function HomePage() {
               </p>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col gap-2">
               <button
                 type="button"
                 onClick={() => handleStartSession(homeData.focusConcept.id, "learn")}
@@ -188,6 +191,13 @@ export default function HomePage() {
               >
                 <span>Continue Learning</span>
                 <span>→</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleStartSession(undefined, "diagnostic")}
+                className="w-full py-2.5 bg-surface-2 hover:bg-line text-ink rounded-xl font-bold text-xs transition-colors text-center"
+              >
+                🔍 Diagnostic Check (Assess your fractions skills)
               </button>
             </div>
           </div>

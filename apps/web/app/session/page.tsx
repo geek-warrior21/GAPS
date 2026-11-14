@@ -11,7 +11,7 @@ function SessionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conceptId = searchParams.get("conceptId") as ConceptId | null;
-  const modeParam = (searchParams.get("mode") || "learn") as "learn" | "review";
+  const modeParam = (searchParams.get("mode") || "learn") as "learn" | "review" | "diagnostic";
 
   const [session, setSession] = useState<LearningSessionDto | null>(null);
   const [initialStep, setInitialStep] = useState<StepDto | null>(null);
