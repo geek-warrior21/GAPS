@@ -18,6 +18,7 @@
     "@gaps/contracts": "workspace:*",
     "@gaps/db": "workspace:*",
     "@gaps/domain": "workspace:*",
+    "drizzle-orm": "^0.45.4",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

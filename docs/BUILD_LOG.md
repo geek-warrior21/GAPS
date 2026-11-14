@@ -381,3 +381,47 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - Unassessed concepts in `concept_beliefs` default to status `not_assessed`.
 - `pnpm db:migrate && pnpm db:seed` added as a mandatory commit gate in `pnpm verify` per Phase 3 requirements.
 
+---
+
+## 2026-11-14 — Phase 4: Identity, Auth, Roles, Roster Management, and Consent Gating
+
+### Built
+
+- **Contracts & Schemas (`packages/contracts/src/auth.ts`):**
+  - Zod schemas for student login (`joinCode`, `username`, `pin`, `deviceKind`), staff login (`email`, `password`, `totp`), profile DTO, consent scopes (`core_learning`, `ai_free_text`, `research_use`), consent recording, adding students, and PIN reset.
+- **Session Management (`apps/web/server/auth/session.ts`):**
+  - 32-byte cryptographically secure random session tokens.
+  - SHA-256 token hashing stored in `auth_sessions`.
+  - Expiry: 8 hours for shared device; 30 days for personal device.
+  - Asynchronous `lastSeenAt` tracking; revocation via `revokedAt`.
+  - Resolution of full `Principal` with active consents and cohort context.
+- **Authentication Services (`apps/web/server/auth/service.ts`):**
+  - `loginStudent`: cohort lookup by joinCode (case-insensitive), username lookup, PIN verification via `verifyPin`, lockout at 10 consecutive failed logins (423), recovery on successful login, and session cookie generation (`gaps_session`).
+  - `loginStaff`: staff lookup by email (case-insensitive), password verification via `verifyPassword`, lockout at 5 failed attempts (423), and session cookie generation.
+  - `logoutUser`: session revocation and `Set-Cookie` expiration header.
+- **Guard & Consent Gating (`apps/web/server/auth/guard.ts`):**
+  - Session token extraction from HTTP cookie or `Authorization: Bearer <token>`.
+  - Role-based authorization (`requirePrincipal`) enforcing role permissions.
+  - `requireCoreConsent`: enforces SPEC §17 invariant that students without `core_learning` consent cannot start learning sessions (HTTP 403 `CONSENT_REQUIRED`).
+- **Auth & Roster API Routes (`apps/web/app/api/v1/`):**
+  - `POST /api/v1/auth/student-login`: student login returning profile and HTTP-only cookie.
+  - `POST /api/v1/auth/staff-login`: staff login returning profile and HTTP-only cookie.
+  - `POST /api/v1/auth/logout`: session revocation.
+  - `GET /api/v1/me`: current authenticated user profile and active consents.
+  - `GET /api/v1/cohorts/[cohortId]/roster`: cohort roster with consent flags, sparks total, and demonstrated concept counts (teacher/admin only).
+  - `POST /api/v1/cohorts/[cohortId]/students`: teacher/admin creates student with hashed PIN, initializing `student_state` (status: `pending_consent`).
+  - `POST /api/v1/students/[studentId]/consent`: records paper or digital consent, promoting status to `active` upon `core_learning` consent grant.
+  - `POST /api/v1/students/[studentId]/reset-pin`: teacher/admin resets student PIN and clears lockouts.
+
+### Verification Results
+
+- `pnpm verify`: 100% green across typecheck, lint, format:check, content:check, db:migrate, db:seed, unit/integration tests, and Next.js standalone build.
+- Tests: **30 test files, 198 tests passed**.
+- Auth Tests (`apps/web/server/auth.test.ts` & `auth.routes.test.ts`): 16 tests covering student login, staff login, lockout, session revocation, consent gating, and student management lifecycle.
+- PostgreSQL 16: Container `gaps-postgres` healthy; health check `GET /api/v1/health` HTTP 200 `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+
+### Assumptions
+
+- Seeded student Meera has active `core_learning` consent; seeded student Kabir starts with `pending_consent` (no active consent) to verify consent gating.
+- Lockout threshold: 10 failed attempts for students, 5 for staff, locking for 15 minutes.
+
