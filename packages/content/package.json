@@ -15,6 +15,7 @@
     "content:preview": "tsx src/preview.ts"
   },
   "dependencies": {
+    "@gaps/contracts": "workspace:*",
     "@gaps/domain": "workspace:*"
   }
 }

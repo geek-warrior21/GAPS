@@ -1565,3 +1565,19 @@ Product ideas, scope and design direction come from the project discussions, the
 | [12] | OpenAI, API vs ChatGPT billing: https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform |
 | [13] | K&S Partners, Children's data protection under India's DPDP Rules (child = under 18; verifiable consent; tracking bar; education exemptions): https://ksandk.com/data-protection-and-data-privacy/childrens-data-protection-under-indias-dpdp-rules/ ; see also S.S. Rana & Co.: https://ssrana.in/articles/schools-coaching-centres-platforms-processing-childrens-data-are-you-compliant/ |
 | [14] | AZB & Partners, DPDP framework comes into effect (phased commencement; substantive obligations from 13 May 2027): https://www.azbpartners.com/bank/update-indias-digital-personal-data-protection-framework-comes-into-effect/ |
+
+## Appendix F  Dynamic Teaching Vertical Slice Specification
+
+### F.1 Overview & Goals
+The dynamic teaching vertical slice introduces interactive, versioned, multi-subject learning sequences to Gaps while strictly preserving all non-negotiables:
+1. **Multi-Subject Taxonomy**: Supports Mathematics and Science across Class 6–8.
+2. **Versioned Lesson Format (`1.0`)**: Standardized schema for lessons composed of distinct, pedagogical activity types (`intro`, `interactive_manipulation`, `predict_and_observe`, `guided_practice`, `independent_check`).
+3. **Interactive Simulation & Manipulation**: Dedicated, accessible interactive widgets (Fraction Strip Partitioner and Electric Circuit Simulator).
+4. **Shared Session Lifecycle & Evidence Authority**: Reuses `learningSessions` with `mode: "lesson"` for state persistence, resume on refresh, and strict separation between interactive participation and independent mastery assessment.
+5. **Pluggable Lesson Planning**: Modular `LessonPlanner` interface allowing authored configurations by default, ready for future LLM integration (e.g. DeepSeek/GPT) with strict fallback and zero runtime dependency on external AI.
+
+### F.2 Invariants & Rules
+- **Rule F.1 (Participation is not Mastery)**: Interacting with simulations, dragging sliders, or exploring circuit states does not grant mastery belief or promote concept status. Only the `independent_check` activity evaluated through the deterministic verifier may update concept beliefs.
+- **Rule F.2 (Universal State Persistence)**: Every activity completion or answer is persisted to session storage immediately. Browser reload resumes the student at their exact activity index with previously entered responses restored.
+- **Rule F.3 (Graceful Fallback)**: Any unparseable, malformed, or missing lesson plan automatically falls back to a verified authored default without throwing 500 errors.
+

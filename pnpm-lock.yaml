@@ -108,6 +108,9 @@ importers:
 
   packages/content:
     dependencies:
+      '@gaps/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@gaps/domain':
         specifier: workspace:*
         version: link:../domain

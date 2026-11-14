@@ -51,3 +51,4 @@ export {
 export * from "./auth";
 export * from "./session";
 export * from "./tutor";
+export * from "./lesson";

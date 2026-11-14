@@ -712,3 +712,60 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
   - S10: Home page displays active session resume banner
 - **Full Verification Gate (`pnpm verify`):** Passed cleanly (typecheck, lint, format:check, content:check, db:migrate, db:seed, unit tests, build, and test:e2e).
 
+---
+
+## Phase 10: Dynamic Teaching Vertical Slice (Maths & Science) (2026-11-15)
+
+**Commit Goal:** Deliver the dynamic teaching vertical slice supporting versioned multi-step lesson activities for Mathematics and Science, interactive simulations (Fraction Strip & Circuit Simulator), predictive observation loops, guided practice, independent verification, and configurable topic expansion with `LLM_PROVIDER=disabled`.
+
+### Built in this Milestone
+
+1. **Versioned Lesson Format & Schemas (`packages/contracts/src/lesson.ts`):**
+   - Defined `LessonPlanSchema` (version `"1.0"`) supporting `subject` (`"maths" | "science"`), `level` (Class 1–12), `topicId`, learning objectives, and at least 2 activities.
+   - Discriminated union of 5 activity types:
+     - `intro`: Headline, rich conceptual body, hook question.
+     - `interactive_manipulation`: Interactive simulation workbench.
+     - `predict_and_observe`: Scientific hypothesis selection, observation reveal, and live simulation verification.
+     - `guided_practice`: Goal-directed manipulation against target criteria with immediate feedback.
+     - `independent_check`: Multiple-choice or open input assessment with rationale.
+   - Schemas for simulations: `FractionStripSimulationSchema` and `CircuitSimulationSchema`.
+   - Contract test suite (`packages/contracts/src/lesson.test.ts`): 5 tests passing.
+
+2. **Authoring & Curriculum Registry (`packages/content/src/lessons/`):**
+   - Registered Class 6 Curriculum Topics for Mathematics and Science (`registry.ts`).
+   - Lesson 1 (`lesson-maths-frac-part-1`): "Fractions: Fair Shares & Parts of a Whole" (5 activities).
+   - Lesson 2 (`lesson-sci-circuits-1`): "Electric Current & Simple Circuits" (5 activities).
+   - Lesson 3 (`lesson-sci-conductors-1`): "Conductors & Insulators: Testing Materials" (3 activities) validating zero-code configuration addition.
+
+3. **Pluggable Lesson Planner (`apps/web/server/lesson/planner.ts`):**
+   - Defined `LessonPlanner` interface with `AuthoredLessonPlanner` (static authoring) and `LlmLessonPlanner` (external AI generation with strict Zod validation).
+   - Graceful fallback to subject defaults when LLM generation fails or `LLM_PROVIDER=disabled`.
+
+4. **Lesson Session Engine & Service (`apps/web/server/lesson/service.ts`):**
+   - End-to-end session lifecycle (`startOrResumeLessonSession`, `getLessonSession`, `submitLessonActivityResponse`).
+   - Rule F.1 / Invariant §3 enforcement: Interactive manipulations and predictions log to the `events` table but never mutate `concept_beliefs`.
+   - Idempotent Sparks award: +15 sparks awarded on `(session.id, "lesson")` upon completing the final activity.
+   - Full progress persistence across page reloads (`currentActivityIndex`, `completedActivities`, `activityResponses`).
+   - Integration test suite (`apps/web/server/lesson.test.ts`): 6 integration tests passing.
+
+5. **Shared Activity Renderer & Widgets (`apps/web/components/lesson/`):**
+   - `FractionStripWidget.tsx`: Interactive fraction bar with dynamic slice controls (1–16 parts), interactive toggle shading, target indicator, and fraction values.
+   - `CircuitSimulatorWidget.tsx`: Interactive circuit simulator with Battery, animated switch lever, bulb filament glow, electron current loop animation, and test conductive objects (copper key vs rubber eraser).
+   - `LessonActivityRenderer.tsx`: Shared renderer executing all 5 activity types.
+   - `LessonPlayer.tsx`: Main lesson player with progress indicator, activity steps, feedback cards, and completion celebration.
+   - Page route at `/lesson/[lessonId]` (`apps/web/app/lesson/[lessonId]/page.tsx`).
+
+6. **Curriculum Navigation & Subject Switcher (`apps/web/app/learn/page.tsx`):**
+   - Added Subject switcher for Class 6: `📐 Mathematics` and `⚡ Science`.
+   - Highlights featured interactive lessons alongside existing practice chapters.
+
+7. **E2E Test Coverage (`apps/web/e2e/student-journey.spec.ts`):**
+   - Added S11: Science dynamic lesson with interactive circuit simulator, prediction, and Sparks.
+   - Added S12: Mathematics dynamic lesson with fraction strip manipulation, reload resume, and verification.
+   - Added S13: Purely configured topic (Conductors & Insulators) runs through shared activity renderer.
+
+### Test Coverage & Verification
+
+- **Vitest Unit & Integration Tests:** **41 test files, 277 tests passing** (100% pass rate).
+- **Playwright E2E Tests:** **13 scenarios, 26 test runs passing** across Desktop Chrome and Mobile Chrome.
+- **Full Verification Gate (`pnpm verify`):** Passed cleanly (typecheck, lint, format:check, content:check, db:migrate, db:seed, unit tests, build, and test:e2e).

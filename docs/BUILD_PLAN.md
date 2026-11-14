@@ -52,3 +52,15 @@ Commit gates (CEO/CTO clarification): every commit requires `pnpm verify` and al
 
 - **Files:** `Dockerfile`, `Caddyfile`, `scripts/{load-test.ts,backup.sh,restore.sh}`, `docs/{RUNBOOK.md,THREAT_MODEL.md}`, updated `README.md`, rate-limit & security header hardening, and fault-injection tests.
 - **Exit checks:** `pnpm verify && pnpm test:e2e && pnpm content:check` all green; `pnpm load-test --users 50` shows deterministic loop p95 ≤ 800 ms; backup/restore drill passes into fresh DB; `PRODUCTION` serves only `review.status === "reviewed"`. **Human checkpoint:** Acceptance suite & release gates G1–G6 review.
+
+## Phase 10 — Dynamic Teaching Vertical Slice (Maths & Science)
+
+- **Goal:** Deliver an interactive, multi-subject dynamic teaching experience across Mathematics and Science with versioned lesson formats, interactive simulations (fractions and simple circuits), shared session lifecycle/resume, and pluggable lesson planning.
+- **Files:**
+  - Contracts: `packages/contracts/src/lesson.ts` (Zod schemas for subjects, topics, lesson plans v1.0, activities), updated `session.ts`.
+  - Content: `packages/content/src/lessons/{types.ts,maths-frac-part.ts,sci-circuits.ts,sci-conductors.ts,registry.ts}`.
+  - Server: `apps/web/server/lesson/{planner.ts,service.ts}`.
+  - API Routes: `/api/v1/curriculum/topics`, `/api/v1/lessons/[lessonId]`, `/api/v1/lessons/[lessonId]/start`, `/api/v1/lessons/[lessonId]/respond`.
+  - UI: `apps/web/components/lesson/{FractionStripWidget.tsx,CircuitSimulatorWidget.tsx,LessonActivityRenderer.tsx,LessonPlayer.tsx}`, `apps/web/app/lesson/[lessonId]/page.tsx`, and updated `apps/web/app/learn/page.tsx`.
+  - Tests: `packages/contracts/src/lesson.test.ts`, `apps/web/server/lesson.test.ts`, and Playwright E2E scenarios in `student-journey.spec.ts`.
+- **Exit checks:** `pnpm verify` 100% green; Maths fractions and Science circuits lessons run end to end; invalid lesson payloads fall back safely; browser refresh restores session state; another topic is added purely via configuration; Invariant §3 strictly preserved (participation is not mastery).

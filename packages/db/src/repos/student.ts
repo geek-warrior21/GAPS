@@ -44,7 +44,7 @@ export interface StudentRepo {
     data: Omit<typeof attempts.$inferInsert, "studentId">,
   ): Promise<typeof attempts.$inferSelect>;
   recordEvent(
-    data: Omit<typeof events.$inferInsert, "studentId">,
+    data: Omit<typeof events.$inferInsert, "studentId" | "id"> & { id?: string },
   ): Promise<typeof events.$inferSelect>;
   getAttemptsForSession(sessionId: string): Promise<(typeof attempts.$inferSelect)[]>;
   getAllAttempts(): Promise<(typeof attempts.$inferSelect)[]>;
@@ -274,10 +274,13 @@ export function createStudentRepo(studentId: string, db: DbClient): StudentRepo 
     },
 
     async recordEvent(data) {
+      const eventId = data.id ?? `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const { id: _, ...rest } = data;
       const [inserted] = await db
         .insert(events)
         .values({
-          ...data,
+          id: eventId,
+          ...rest,
           studentId,
         })
         .returning();

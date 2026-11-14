@@ -342,4 +342,206 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page).toHaveURL(/\/session/);
     await expect(page.locator("button:has-text('Check Answer')")).toBeVisible();
   });
+
+  test("S11: Science dynamic lesson with interactive circuit simulator, prediction, and Sparks", async ({
+    page,
+  }) => {
+    // 1. Sign in as Meera
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "meera");
+    await page.fill("#pin", "333333");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn and switch to Science
+    await page.goto("/learn");
+    await expect(page).toHaveURL(/\/learn/);
+
+    const scienceTab = page.locator("[data-testid='tab-subject-science']");
+    await expect(scienceTab).toBeVisible();
+    await scienceTab.click();
+
+    // 3. Launch Science Lesson: Electric Current & Simple Circuits
+    const launchBtn = page.locator("[data-testid='start-circuits-lesson-button']");
+    await expect(launchBtn).toBeVisible();
+    await launchBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-1/);
+
+    // Step 1: Intro activity
+    await expect(page.getByText("Concept Introduction", { exact: true })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Step 2: Interactive Circuit Manipulation
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    // Toggle the switch
+    const switchToggle = page.getByTestId("toggle-circuit-switch");
+    await expect(switchToggle).toBeVisible();
+    await switchToggle.click();
+    // Proceed
+    await page.click("button:has-text('Next Step')");
+
+    // Step 3: Predict & Observe
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+    const predictChoice = page.locator("button:has-text('The bulb stays dark')");
+    await expect(predictChoice).toBeVisible();
+    await predictChoice.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+
+    // Verify observation revealed
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // Step 4: Guided Practice
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    // Flip switch to closed
+    const guidedSwitch = page.getByTestId("toggle-circuit-switch");
+    await expect(guidedSwitch).toBeVisible();
+    await guidedSwitch.click();
+    await page.click("button:has-text('Check Solution')");
+    await expect(page.getByText("Goal Achieved!")).toBeVisible();
+    await page.click("button:has-text('Continue')");
+
+    // Step 5: Independent Check
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    const independentChoice = page.locator("button:has-text('A complete, closed conducting loop')");
+    await expect(independentChoice).toBeVisible();
+    await independentChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Verify Completion Screen
+    await expect(page.getByText("Lesson Concluded")).toBeVisible();
+    await expect(page.getByText("Outstanding Effort!")).toBeVisible();
+    await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
+  });
+
+  test("S12: Mathematics dynamic lesson with fraction strip manipulation, reload resume, and verification", async ({
+    page,
+  }) => {
+    // 1. Sign in as Aarav
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "aarav");
+    await page.fill("#pin", "121212");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn and launch Fractions lesson
+    await page.goto("/learn");
+    await expect(page).toHaveURL(/\/learn/);
+
+    const launchMathsBtn = page.locator("[data-testid='start-maths-lesson-button']");
+    await expect(launchMathsBtn).toBeVisible();
+    await launchMathsBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
+
+    // Step 1: Intro
+    await expect(page.getByText("Concept Introduction", { exact: true })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Step 2: Interactive Manipulation
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Wait until Activity 3 has loaded
+    await expect(page.getByText("ACTIVITY 3 OF 5")).toBeVisible();
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+
+    // Step 3: Test Reload & Resume Progress
+    await page.reload();
+    await expect(page.getByText("ACTIVITY 3 OF 5")).toBeVisible();
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+
+    // Make prediction
+    const choice34 = page.locator("button:has-text('3/4 (three-fourths)')");
+    await expect(choice34).toBeVisible();
+    await choice34.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // Step 4: Guided Challenge (model 2/5: initialParts=3, initialShaded=1)
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    // Increase parts twice to 5
+    const plusParts = page.locator("button[aria-label='Increase parts']");
+    await plusParts.click();
+    await plusParts.click();
+    // Increase shaded once to 2
+    const plusShaded = page.locator("button[aria-label='Increase shaded parts']");
+    await plusShaded.click();
+
+    // Check solution
+    await page.click("button:has-text('Check Solution')");
+    await expect(page.getByText("Goal Achieved!")).toBeVisible();
+    await page.click("button:has-text('Continue')");
+
+    // Step 5: Independent Check (Kabir eats 5 squares of 6 -> 5/6)
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    const choice56 = page.locator("button:has-text('5/6')");
+    await expect(choice56).toBeVisible();
+    await choice56.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Verify Completion Screen
+    await expect(page.getByText("Lesson Concluded")).toBeVisible();
+    await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
+  });
+
+  test("S13: Purely configured topic (Conductors & Insulators) runs through shared activity renderer", async ({
+    page,
+  }) => {
+    // 1. Sign in as Meera
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "meera");
+    await page.fill("#pin", "333333");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn -> Science
+    await page.goto("/learn");
+    await expect(page).toHaveURL(/\/learn/);
+
+    const scienceTab = page.locator("[data-testid='tab-subject-science']");
+    await expect(scienceTab).toBeVisible();
+    await scienceTab.click();
+
+    // 3. Launch Conductors Lesson
+    const conductorsBtn = page.locator("[data-testid='start-conductors-lesson-button']");
+    await expect(conductorsBtn).toBeVisible();
+    await conductorsBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-conductors-1/);
+
+    // Step 1: Intro
+    await expect(page.getByText("The Metal Core and the Plastic Skin")).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Step 2: Predict testing copper key
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+    const copperChoice = page.locator(
+      "button:has-text('Yes, copper is a metal conductor and will complete the loop')",
+    );
+    await expect(copperChoice).toBeVisible();
+    await copperChoice.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // Step 3: Independent Check (Which object is an insulator -> rubber eraser)
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    const eraserChoice = page.locator("button:has-text('A rubber eraser')");
+    await expect(eraserChoice).toBeVisible();
+    await eraserChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Verify Completion Screen
+    await expect(page.getByText("Lesson Concluded")).toBeVisible();
+    await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
+  });
 });

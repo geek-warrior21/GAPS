@@ -5,6 +5,7 @@ export * from "./edges";
 export * from "./misconceptions";
 export * from "./explanations";
 export * from "./templates";
+export * from "./lessons";
 
 import { createRng } from "@gaps/domain";
 import type { Template } from "./types";
