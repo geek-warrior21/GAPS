@@ -51,6 +51,21 @@ export default async function HomePage() {
         </p>
         <p className="mt-2 text-base text-[var(--text)]">{messages.tagline}</p>
         <p className="mt-3 text-sm text-[var(--muted)]">{messages.phaseBanner.description}</p>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <a
+            href="/login"
+            className="px-5 py-3 rounded-xl bg-primary text-white font-extrabold text-sm hover:bg-primary-ink active:scale-98 transition-all shadow-sm"
+          >
+            Launch Student Portal (Login) →
+          </a>
+          <a
+            href="/home"
+            className="px-5 py-3 rounded-xl bg-surface-2 border border-line text-ink font-bold text-sm hover:bg-line active:scale-98 transition-all"
+          >
+            Open Dashboard →
+          </a>
+        </div>
       </header>
 
       <HealthStatusCard initialHealth={healthSnapshot.body} />

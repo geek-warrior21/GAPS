@@ -39,14 +39,20 @@ export class AuthError extends Error {
 }
 
 function buildSessionCookie(token: string, maxAgeSeconds: number): string {
-  const isProd = process.env.NODE_ENV === "production";
-  const secureFlag = isProd ? "; Secure" : "";
+  const isSecure =
+    process.env.NODE_ENV === "production" &&
+    process.env.COOKIE_INSECURE !== "true" &&
+    process.env.PLAYWRIGHT_TEST !== "1";
+  const secureFlag = isSecure ? "; Secure" : "";
   return `gaps_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secureFlag}`;
 }
 
 export function buildClearCookie(): string {
-  const isProd = process.env.NODE_ENV === "production";
-  const secureFlag = isProd ? "; Secure" : "";
+  const isSecure =
+    process.env.NODE_ENV === "production" &&
+    process.env.COOKIE_INSECURE !== "true" &&
+    process.env.PLAYWRIGHT_TEST !== "1";
+  const secureFlag = isSecure ? "; Secure" : "";
   return `gaps_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`;
 }
 

@@ -472,3 +472,49 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - Client-safe `ItemViewDto` strictly omits `templateId`, `answer`, and `misconceptions`.
 - First-try incorrect attempts transition to `feedback_then_retry` step containing the item view and friendly copy.
 - BigInt values in answer specifications and parsed values are recursively serialized to strings for Postgres `jsonb` columns, and hydrated to BigInts upon retrieval.
+
+---
+
+## 2026-11-14 — Phase 6: Student UI, AnswerPad, Visual Models, GapMap, and Playwright E2E Suite
+
+### Built
+
+- **Math & Visual UI Components (`apps/web/components/`):**
+  - `RichTextViewer.tsx`: Renders rich text AST elements (`text`, `frac` as vertical stacked fraction numerator/denominator, `mixed`, `math`, `blank`).
+  - `AnswerPad.tsx`: Complete virtual keypad for Class 6–8 students with digits 0–9, fraction slash `/`, mixed numbers `w n/d`, decimal `.`, negative `-`, comparison buttons (`<`, `=`, `>`), backspace, clear, check answer button, and multiple-choice options with live mathematical expression rendering.
+  - `VisualViewer.tsx`: Responsive SVG visual models matching SPEC §8:
+    - `fraction_bar`: shaded and unshaded partitions with segment numerator/denominator labels.
+    - `number_line`: axis line, whole number marks, subdivision tick marks with fraction labels, jump arcs, and point indicators.
+    - `area_model`: 2D partitioned grid models.
+  - `QuestCard.tsx`: Daily Quest component displaying today's 3 quest slots (review, target, challenge), completion checkmarks, progress bar, and +10 Sparks bonus badge.
+  - `GapMap.tsx`: Interactive SVG and card-based knowledge graph for all 14 curriculum concepts across Chapters A, B, and C with status badges (`retained`, `demonstrated`, `developing`, `needs_support`, `not_assessed`), summary statistics, and click-to-open evidence drawer showing why the status was assigned, independent attempt counts, measurement reliability, and prerequisites.
+  - `SessionPlayer.tsx`: Active learning player container with progress dots, question prompt, visual model viewer, AnswerPad, 3-rung hint ladder, worked example drawer, 3-route explanation drawer (`picture`, `everyday`, `steps`), gentle "not yet!" feedback banners (INVARIANT §9 & §10), and session completion celebration card.
+  - `Header.tsx`: Global student header displaying Gaps branding, student display name, Sparks pill, and sign-out button.
+- **Application Pages (`apps/web/app/`):**
+  - `login/page.tsx`: Student login interface with class join code, username, 6-digit PIN, device selector (`personal`/`shared`), and quick demo student buttons (`Meera`, `Kabir`, `Aarav`).
+  - `home/page.tsx`: Student dashboard integrating Header, Continue Learning target action, Daily Quest widget, due review alert banner, and interactive GapMap with evidence inspection.
+  - `session/page.tsx`: Learning session page that starts session via `/api/v1/sessions/start`, mounts `SessionPlayer`, handles consent gating blocks, and connects attempt submissions and hint requests.
+  - `page.tsx`: Updated root landing page with direct launch buttons into `/login` and `/home`.
+- **E2E Test Suite & Infrastructure (`apps/web/e2e/`, `apps/web/playwright.config.ts`):**
+  - Configured Playwright with standalone server (`PORT=3100 node .next/standalone/apps/web/server.js`) and auto-copy of `.next/static` to standalone directory.
+  - Projects: Desktop Chrome and Mobile Chrome (Pixel 7).
+  - `e2e/student-journey.spec.ts`:
+    - **S1 (Home & GapMap):** Student login as Meera (`DEMO7A / meera / 333333`), lands on `/home`, verifies Daily Quest, Continue Learning card, GapMap with 14 skills, opens concept evidence drawer ("Why this status?", "Measurement reliability"), and closes modal.
+    - **S2 (Session Loop & Gentle Copy):** Student login as Aarav (`DEMO7A / aarav / 121212`), launches `/session`, verifies AnswerPad, inputs incorrect answer `9`, verifies "not yet!" feedback without negative wording ("wrong", "failed"), tests hint ladder rung 1, and tests worked example drawer.
+    - **S3 (Consent Gating):** Student login as Kabir (`DEMO7A / kabir / 444444`), attempts to start learning session, verifies blocked by consent gate with helpful message directing student to parent consent form.
+- **Verification Gate Integration:**
+  - Added `pnpm test:e2e` to `package.json` `"verify"` script, satisfying Phase 6 onward requirement for automated Playwright execution.
+
+### Verification Results
+
+- `pnpm verify`: 100% passed (typecheck, lint, format:check, content:check, db:migrate, db:seed, vitest unit tests, standalone build, and Playwright E2E tests).
+- E2E Tests: **6 tests passed across Desktop Chrome and Mobile Chrome (3.5s)**.
+- Vitest Unit Tests: **31 test files, 209 tests passed**.
+- Real PostgreSQL 16 health check: `GET /api/v1/health` returned HTTP 200 `{"status":"ok","db":"ok","llm":"disabled","version":"0.1.0"}`.
+- Next.js build: Turbopack standalone compilation in 730ms.
+
+### Assumptions
+
+- Standalone Next.js server serves static assets after copying `.next/static` into `.next/standalone/apps/web/.next/static`.
+- Cookie security flag is relaxed in non-HTTPS testing mode when `PLAYWRIGHT_TEST=1` is set.
+- Meera (`DEMO7A / meera / 333333`) serves as the primary demo inspection account; Aarav (`DEMO7A / aarav / 121212`) practices active attempts; Kabir (`DEMO7A / kabir / 444444`) tests parent consent gating.
