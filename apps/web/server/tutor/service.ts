@@ -229,11 +229,38 @@ QUESTION CONTEXT: ${context.currentQuestion?.promptText ?? "None"}
     createdAt: new Date().toISOString(),
   };
 
+  // Mark assistance on current item server-side
+  let tutorAssistance = 0;
+  if (assistantActionType === "hint") {
+    tutorAssistance = Math.min(Math.max(newHintsCount, 1), 3);
+  } else if (assistantActionType === "example") {
+    tutorAssistance = 3;
+  } else if (
+    assistantActionType === "explain" ||
+    assistantActionType === "clarification" ||
+    assistantActionType === "visual"
+  ) {
+    tutorAssistance = 2;
+  }
+
+  const itemAssistanceMap = (counters.itemAssistance as Record<string, number>) ?? {};
+  let updatedItemAssistance = itemAssistanceMap;
+
+  if (tutorAssistance > 0 && context.currentQuestion?.itemInstanceId) {
+    const itemId = context.currentQuestion.itemInstanceId;
+    const existingLevel = itemAssistanceMap[itemId] ?? 0;
+    updatedItemAssistance = {
+      ...itemAssistanceMap,
+      [itemId]: Math.max(existingLevel, tutorAssistance),
+    };
+  }
+
   const updatedMessages = [...currentMessages, studentMessage, assistantMessage];
   const updatedCounters = {
     ...counters,
     tutorMessages: updatedMessages,
     hintsRevealed: newHintsCount,
+    itemAssistance: updatedItemAssistance,
   };
 
   // Persist conversation in session counters

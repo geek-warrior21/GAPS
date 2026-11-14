@@ -648,3 +648,67 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - Content validation: `content:check` verified 42 templates across 500 seeds each.
 - Database: PostgreSQL 16 verified healthy; migrations and seeds idempotent.
 - Next.js build: Standalone production build compiled successfully.
+
+---
+
+## Phase 9: Complete Student Journeys & Server-Side Assistance Gating (2026-11-14)
+
+**Commit Goal:** Deliver complete end-to-end student learning journeys (Home, Learn, Play, GapMap, Solve With Me, Boss Battles, Daily Quests, Quick Check onboarding, Comeback Cards, and Active Session resume) with server-side assistance derivation and full Playwright E2E test coverage with `LLM_PROVIDER=disabled`.
+
+### Built in this Milestone
+
+1. **Server-Side Assistance Tracking & Invariant §3 Enforcement:**
+   - Server-side tracking in `apps/web/server/tutor/service.ts` and `apps/web/server/session/engine.ts`: whenever a tutor hint, visual model, explanation, or worked example is accessed, the current item in the session is permanently marked assisted (`itemAssistance[itemId] >= 2`).
+   - `processSessionAttempt` derives `assistanceLevel` directly from stored session counters/events, preventing client tampering.
+   - Verified that assisted attempts cannot promote concept mastery (Invariant §3), page refresh preserves assisted status, and unassisted fresh items count as independent.
+
+2. **Student Navigation & Layout (`Header.tsx`):**
+   - Universal navigation links across desktop and mobile: `Home` (`/home`), `Learn` (`/learn`), `Play` (`/play`), `GapMap` (`/gapmap`), and `Solve With Me` (`/solve`).
+   - Active route highlighting, student avatar, Sparks counter badge, and sign-out button.
+
+3. **Chapter & Concept Browsing (`apps/web/app/learn/page.tsx`):**
+   - Full curriculum browsing covering 3 chapters (Chapter A: "Meet the fractions", Chapter B: "Fraction operations", Chapter C: "Fractions in the world") and 14 concepts in topological order.
+   - Distinctive status badges ("Not explored yet", "Let's work on this", "Getting there", "You can do this", "Locked in").
+   - Direct launch of practice sessions for any concept.
+
+4. **Play & Challenges (`apps/web/app/play/page.tsx`):**
+   - Daily Quest card integration with progress tracking across quest slots.
+   - Three Chapter Boss Battles:
+     - Chapter A Boss: "The Equal Splitter" (unlocks at 4 of 7 concepts).
+     - Chapter B Boss: "The Cross Multiplier" (unlocks at 3 of 5 concepts).
+     - Chapter C Boss: "The Real-World Riddle" (unlocks at 1 of 2 concepts).
+   - Boss session configuration: 8 items, difficulty 2, no hints (`help: []`), 1 try per item, finished award +10 sparks, win award +40 sparks ($\ge 6/8$ correct). Attempts never promote mastery.
+
+5. **Daily Quest Completion & Sparks Idempotency:**
+   - `startDailyQuestSession` starts or advances sessions bound to quest slots.
+   - Completing all quest slots idempotently awards +20 sparks on `(questId, "quest")`, preserved after refresh.
+
+6. **Onboarding & Session Continuity (`apps/web/app/home/page.tsx`):**
+   - Optional 5-question Quick Check onboarding (`/api/v1/quick-check`) and "Just start learning" shortcut for new students.
+   - Active session reconnect/resume banner ("Session in Progress") with 1-click continuation.
+   - Celebration banner for earned Comeback Cards with dismiss action (`/api/v1/comeback-cards/[cardId]/seen`).
+
+7. **AI-Off Guided "Solve With Me" (`apps/web/app/solve/page.tsx`, `initSolveWithMe`):**
+   - Deterministic conceptual matching for common fraction questions and 6 interactive presets.
+   - Surfaces structured visual models (fraction bars, number lines, division) and worked examples without invoking external LLMs.
+   - Direct "Try one like it →" action initiating targeted practice on the matching concept.
+
+8. **Session Completion Summary (`SessionPlayer.tsx`):**
+   - Comprehensive end-of-session summary rendering items resolved, accuracy, Sparks earned, concepts practiced, and next recommended actions.
+
+### Test Coverage & Verification
+
+- **Vitest Unit & Integration Tests:** **39 test files, 266 tests passing** (100% pass rate).
+- **Playwright E2E Tests (`apps/web/e2e/student-journey.spec.ts`):** **10 test scenarios, 20 test runs passing** across Desktop Chrome and Mobile Chrome (Pixel 7):
+  - S1: Student login as Meera, reaches home dashboard, sees Quest & GapMap
+  - S2: Active session loop with two-try rule, gentle copy, and teaching support
+  - S3: Consent gating blocks student missing core consent (Kabir)
+  - S4: Diagnostic assessment launches, adapts, and presents diagnostic items
+  - S5: Interactive AI Maths Tutor provides progressive disclosure and concept guidance
+  - S6: Navigation across Home, Learn, Play, GapMap, and Solve With Me
+  - S7: Chapter and concept browsing on Learn page and launching concept practice
+  - S8: Play page displays Daily Quest and Chapter Boss unlock rules
+  - S9: AI-off Solve With Me guided mode provides visual models and Try One Like It
+  - S10: Home page displays active session resume banner
+- **Full Verification Gate (`pnpm verify`):** Passed cleanly (typecheck, lint, format:check, content:check, db:migrate, db:seed, unit tests, build, and test:e2e).
+

@@ -31,7 +31,7 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     // 4. Verify Quest Card & GapMap exist
     await expect(page.getByText("Daily Quest")).toBeVisible();
     await expect(page.getByText("Continue Learning")).toBeVisible();
-    await expect(page.getByText("GapMap")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "GapMap" })).toBeVisible();
 
     // 5. Click a concept in GapMap to inspect evidence drawer
     const conceptButton = page.locator("button:has-text('Parts of a whole')").first();
@@ -176,5 +176,170 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     // 7. Verification: Submit answer on the actual AnswerPad
     const checkAnswerBtn = page.locator("button:has-text('Check Answer')");
     await expect(checkAnswerBtn).toBeVisible();
+  });
+
+  test("S6: Student navigation across Home, Learn, Play, GapMap, and Solve With Me", async ({
+    page,
+  }) => {
+    // 1. Sign in as Meera
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "meera");
+    await page.fill("#pin", "333333");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn
+    await page.locator("a[href='/learn']:visible").first().click();
+    await expect(page).toHaveURL(/\/learn/);
+    await expect(page.locator("h1")).toContainText("Fractions Curriculum");
+
+    // 3. Navigate to Play
+    await page.locator("a[href='/play']:visible").first().click();
+    await expect(page).toHaveURL(/\/play/);
+    await expect(page.locator("h1")).toContainText("Play & Challenges");
+
+    // 4. Navigate to GapMap
+    await page.locator("a[href='/gapmap']:visible").first().click();
+    await expect(page).toHaveURL(/\/gapmap/);
+    await expect(page.locator("h1")).toContainText("GapMap");
+
+    // 5. Navigate to Solve With Me
+    await page.locator("a[href='/solve']:visible").first().click();
+    await expect(page).toHaveURL(/\/solve/);
+    await expect(page.locator("h1")).toContainText("Solve With Me");
+
+    // 6. Return Home
+    await page.locator("a[href='/home']:visible").first().click();
+    await expect(page).toHaveURL(/\/home/);
+  });
+
+  test("S7: Chapter and concept browsing on Learn page and launching concept practice", async ({
+    page,
+  }) => {
+    // Sign in as Meera
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "meera");
+    await page.fill("#pin", "333333");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // Visit Learn page
+    await page.goto("/learn");
+    await expect(page.locator("h1")).toContainText("Fractions Curriculum");
+
+    // Verify all 3 chapters are listed
+    await expect(page.getByText("Chapter A", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Meet the fractions" })).toBeVisible();
+    await expect(page.getByText("Chapter B", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fraction operations" })).toBeVisible();
+    await expect(page.getByText("Chapter C", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fractions in the world" })).toBeVisible();
+
+    // Verify concepts inside Chapter A are visible
+    await expect(page.getByText("Parts of a whole").first()).toBeVisible();
+
+    // Start learning/practising on first concept
+    const startBtn = page
+      .locator("button:has-text('Practise Skill'), button:has-text('Start Learning')")
+      .first();
+    await expect(startBtn).toBeVisible();
+    await startBtn.click();
+
+    // Reaches session
+    await expect(page).toHaveURL(/\/session.*mode=learn/);
+    await expect(page.locator("button:has-text('Check Answer')")).toBeVisible();
+  });
+
+  test("S8: Play page displays Daily Quest and Chapter Boss unlock rules", async ({ page }) => {
+    // Sign in as Meera
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "meera");
+    await page.fill("#pin", "333333");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // Visit Play page
+    await page.goto("/play");
+    await expect(page.locator("h1")).toContainText("Play & Challenges");
+
+    // Verify Daily Challenge card
+    await expect(page.getByText("Daily Challenge")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Daily Quest" })).toBeVisible();
+
+    // Verify Boss Battles section and chapter cards
+    await expect(page.getByText("Chapter Boss Battles")).toBeVisible();
+    await expect(page.getByText("The Equal Splitter")).toBeVisible();
+    await expect(page.getByText("The Cross Multiplier")).toBeVisible();
+    await expect(page.getByText("The Real-World Riddle")).toBeVisible();
+
+    // Verify unlock requirements text and lock status are displayed
+    await expect(page.getByText("🔒 Locked").first()).toBeVisible();
+    await expect(page.getByText(/Demonstrate or develop at least/i).first()).toBeVisible();
+    await expect(page.getByText("Progress to unlock").first()).toBeVisible();
+  });
+
+  test("S9: AI-off Solve With Me guided mode provides visual models and Try One Like It", async ({
+    page,
+  }) => {
+    // Sign in as Meera
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "meera");
+    await page.fill("#pin", "333333");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // Visit Solve With Me
+    await page.goto("/solve");
+    await expect(page.locator("h1")).toContainText("Solve With Me");
+
+    // Click preset problem for Adding unlike fractions
+    const presetBtn = page.locator(
+      "button:has-text('Adding unlike fractions: Common denominator')",
+    );
+    await expect(presetBtn).toBeVisible();
+    await presetBtn.click();
+
+    // Verify Visual Explanation and Target Concept are rendered
+    await expect(page.getByText("Visual Explanation")).toBeVisible();
+    await expect(page.getByText("Target Concept")).toBeVisible();
+
+    // Verify "Try one like it" button navigates to session
+    const tryBtn = page.locator("button:has-text('Try one like it')");
+    await expect(tryBtn).toBeVisible();
+    await tryBtn.click();
+
+    await expect(page).toHaveURL(/\/session.*conceptId=MATH-FRAC-ADDUNLIKE/);
+    await expect(page.locator("button:has-text('Check Answer')")).toBeVisible();
+  });
+
+  test("S10: Home page displays active session resume banner", async ({ page }) => {
+    // Sign in as Aarav (starts a session)
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "aarav");
+    await page.fill("#pin", "121212");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // Launch session
+    await page.click("button:has-text('Continue Learning')");
+    await expect(page).toHaveURL(/\/session/);
+
+    // Navigate back to home
+    await page.goto("/home");
+
+    // Session in progress banner should be displayed
+    await expect(page.getByText("Session in Progress")).toBeVisible();
+    const resumeBtn = page.locator("button:has-text('Resume Session →')");
+    await expect(resumeBtn).toBeVisible();
+    await resumeBtn.click();
+
+    // Reaches session
+    await expect(page).toHaveURL(/\/session/);
+    await expect(page.locator("button:has-text('Check Answer')")).toBeVisible();
   });
 });

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull, lte, sql } from "drizzle-orm";
 import type { DbClient } from "../client";
 import {
   attempts,
+  bossBattles,
   comebackCards,
   conceptBeliefs,
   consentRecords,
@@ -71,6 +72,15 @@ export interface StudentRepo {
     data: Omit<typeof comebackCards.$inferInsert, "studentId">,
   ): Promise<typeof comebackCards.$inferSelect>;
   markComebackCardSeen(cardId: string): Promise<boolean>;
+  getBossBattle(chapterId: string): Promise<typeof bossBattles.$inferSelect | null>;
+  listBossBattles(): Promise<(typeof bossBattles.$inferSelect)[]>;
+  createBossBattle(
+    data: Omit<typeof bossBattles.$inferInsert, "studentId">,
+  ): Promise<typeof bossBattles.$inferSelect>;
+  updateBossBattle(
+    id: string,
+    updates: Partial<typeof bossBattles.$inferInsert>,
+  ): Promise<typeof bossBattles.$inferSelect | null>;
   getActiveConsents(): Promise<(typeof consentRecords.$inferSelect)[]>;
   hasConsent(scope: string): Promise<boolean>;
 }
@@ -442,6 +452,47 @@ export function createStudentRepo(studentId: string, db: DbClient): StudentRepo 
         .where(and(eq(comebackCards.id, cardId), eq(comebackCards.studentId, studentId)))
         .returning();
       return Boolean(updated);
+    },
+
+    async getBossBattle(chapterId: string) {
+      const rows = await db
+        .select()
+        .from(bossBattles)
+        .where(and(eq(bossBattles.studentId, studentId), eq(bossBattles.chapterId, chapterId)))
+        .orderBy(desc(bossBattles.createdAt))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async listBossBattles() {
+      return db
+        .select()
+        .from(bossBattles)
+        .where(eq(bossBattles.studentId, studentId))
+        .orderBy(desc(bossBattles.createdAt));
+    },
+
+    async createBossBattle(data) {
+      const [created] = await db
+        .insert(bossBattles)
+        .values({
+          ...data,
+          studentId,
+        })
+        .returning();
+      if (!created) {
+        throw new Error(`Failed to create boss battle for ${studentId}`);
+      }
+      return created;
+    },
+
+    async updateBossBattle(id: string, updates) {
+      const [updated] = await db
+        .update(bossBattles)
+        .set(updates)
+        .where(and(eq(bossBattles.id, id), eq(bossBattles.studentId, studentId)))
+        .returning();
+      return updated ?? null;
     },
 
     async getActiveConsents() {

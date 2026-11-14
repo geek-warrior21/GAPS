@@ -342,6 +342,44 @@ export function SessionPlayer({
     );
   }
 
+  if (currentStep.kind === "summary") {
+    const summary = currentStep.summary;
+    return (
+      <div className="max-w-md mx-auto p-8 bg-surface rounded-3xl border border-line shadow-lg text-center space-y-6">
+        <div className="w-16 h-16 bg-teal/15 text-teal text-3xl rounded-full flex items-center justify-center mx-auto shadow-xs">
+          ✦
+        </div>
+
+        <div className="space-y-1">
+          <h2 className="text-2xl font-extrabold text-ink">Session Complete!</h2>
+          <p className="text-xs text-muted leading-relaxed font-medium">{summary.note}</p>
+        </div>
+
+        <div className="p-4 bg-surface-2 rounded-2xl border border-line flex items-center justify-around tabular-nums">
+          <div>
+            <div className="text-2xl font-extrabold text-ink">{summary.itemsAttempted}</div>
+            <div className="text-xs font-bold text-muted">Items resolved</div>
+          </div>
+          <div className="w-px h-8 bg-line" />
+          <div>
+            <div className="text-2xl font-extrabold text-accent">+{summary.sparksEarned}</div>
+            <div className="text-xs font-bold text-muted">Sparks earned</div>
+          </div>
+        </div>
+
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={onSessionComplete || onExit}
+            className="w-full py-3.5 bg-primary text-white rounded-xl font-bold text-base hover:bg-primary-ink transition-colors shadow-xs"
+          >
+            Return to Dashboard →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!item) {
     return <div className="p-8 text-center text-muted">Loading next question…</div>;
   }

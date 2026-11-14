@@ -11,6 +11,7 @@ import {
 } from "./repos/index";
 import { seedDatabase } from "./seed";
 import { syncContent } from "./content-sync";
+import { studentState, users } from "./schema";
 
 describe("Principal-Scoped Repositories", () => {
   const db = getDb();
@@ -97,7 +98,24 @@ describe("Principal-Scoped Repositories", () => {
     });
 
     it("awards sparks idempotently", async () => {
-      const repo = createStudentRepo(meeraId, db);
+      const sparksStudentId = `stu_sparks_iso_${Date.now()}`;
+      await db.insert(users).values({
+        id: sparksStudentId,
+        role: "student",
+        orgId: "org_01J00000000000000000000001",
+        cohortId: "coh_01J00000000000000000000001",
+        displayName: "Sparks Test",
+        username: `sparks_iso_${Date.now()}`,
+        pinHash: "hash123",
+        status: "active",
+      });
+      await db.insert(studentState).values({
+        studentId: sparksStudentId,
+        stateVersion: 1,
+        sparksTotal: 0,
+      });
+
+      const repo = createStudentRepo(sparksStudentId, db);
       const initialTotal = await repo.getSparksTotal();
 
       const sourceId = `test_spark_source_${Date.now()}`;

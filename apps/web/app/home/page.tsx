@@ -62,12 +62,28 @@ export default function HomePage() {
 
   const handleStartSession = (
     conceptId?: string,
-    mode: "learn" | "review" | "diagnostic" = "learn",
+    mode: "learn" | "review" | "diagnostic" | "quick_check" = "learn",
   ) => {
     const url = conceptId
       ? `/session?conceptId=${conceptId}&mode=${mode}`
       : `/session?mode=${mode}`;
     router.push(url);
+  };
+
+  const handleDismissComebackCard = async (cardId: string) => {
+    try {
+      await fetch(`/api/v1/comeback-cards/${cardId}/seen`, { method: "POST" });
+      setHomeData((prev) =>
+        prev
+          ? {
+              ...prev,
+              recentComebackCard: null,
+            }
+          : prev,
+      );
+    } catch {
+      // Ignore network errors
+    }
   };
 
   if (isLoading) {
@@ -136,6 +152,79 @@ export default function HomePage() {
       />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8 space-y-8">
+        {/* Reconnect / Resume Active Session Banner */}
+        {homeData.activeSession && (
+          <div className="p-4 bg-primary/10 border border-primary/30 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⚡</span>
+              <div>
+                <h4 className="font-extrabold text-ink text-sm">Session in Progress</h4>
+                <p className="text-xs text-muted">
+                  You have an unfinished {homeData.activeSession.mode} session. Pick up right where
+                  you left off!
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  `/session?sessionId=${homeData.activeSession!.id}&mode=${homeData.activeSession!.mode}`,
+                )
+              }
+              className="px-4 py-2 bg-primary hover:bg-primary-ink text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+            >
+              Resume Session →
+            </button>
+          </div>
+        )}
+
+        {/* Comeback Card Celebration Banner */}
+        {homeData.recentComebackCard && (
+          <div className="p-5 bg-gradient-to-r from-accent/15 via-primary/10 to-teal/15 border border-accent/40 rounded-3xl space-y-3 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">🎉</span>
+                <div>
+                  <span className="text-2xs font-extrabold text-accent-ink uppercase tracking-wider">
+                    Comeback Card Unlocked!
+                  </span>
+                  <h3 className="font-extrabold text-ink text-base">
+                    {homeData.recentComebackCard.message.headline}
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleDismissComebackCard(homeData.recentComebackCard!.id)}
+                className="text-muted hover:text-ink text-xs font-bold px-2 py-1"
+              >
+                ✕ Dismiss
+              </button>
+            </div>
+
+            <p className="text-xs text-text leading-relaxed font-medium">
+              {homeData.recentComebackCard.message.story}
+            </p>
+
+            <div className="flex items-center justify-between pt-1">
+              <div className="text-2xs text-muted font-bold">
+                Citing {homeData.recentComebackCard.pastAttemptIds.length} earlier attempts &{" "}
+                {homeData.recentComebackCard.presentAttemptIds.length} verified mastery attempts.
+              </div>
+              <button
+                type="button"
+                onClick={() => handleDismissComebackCard(homeData.recentComebackCard!.id)}
+                className="px-4 py-1.5 bg-primary text-white text-xs font-bold rounded-xl shadow-2xs hover:bg-primary-ink"
+              >
+                Celebrate!
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Retention / Warmup Review Due Banner */}
         {homeData.dueReviews.length > 0 && (
           <div className="p-4 bg-teal/10 border border-teal/40 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
@@ -158,6 +247,60 @@ export default function HomePage() {
             >
               Start Review Now →
             </button>
+          </div>
+        )}
+
+        {/* Optional Quick Check & Just Start Onboarding Banner */}
+        {homeData.focusConcept.status === "not_assessed" && (
+          <div className="p-6 bg-surface rounded-3xl border border-line shadow-xs space-y-4">
+            <div className="space-y-1">
+              <span className="text-2xs font-extrabold text-primary uppercase tracking-wider">
+                Getting Started
+              </span>
+              <h3 className="text-lg font-extrabold text-ink">
+                Welcome to Gaps! How would you like to begin?
+              </h3>
+              <p className="text-xs text-muted">
+                Choose a quick 5-question check to find your starting point, or jump right into
+                Parts of a whole.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <button
+                type="button"
+                onClick={() => handleStartSession(undefined, "quick_check")}
+                className="p-4 rounded-2xl border border-primary/30 bg-primary/5 hover:bg-primary/10 text-left space-y-1.5 transition-colors group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-lg">🎯</span>
+                  <span className="text-xs font-extrabold text-primary group-hover:translate-x-0.5 transition-transform">
+                    Start →
+                  </span>
+                </div>
+                <h4 className="font-extrabold text-ink text-sm">Quick Check</h4>
+                <p className="text-xs text-muted">
+                  5 quick questions to find your personalized starting level.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleStartSession("MATH-FRAC-PART", "learn")}
+                className="p-4 rounded-2xl border border-line bg-surface-2/60 hover:bg-surface-2 text-left space-y-1.5 transition-colors group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-lg">🚀</span>
+                  <span className="text-xs font-extrabold text-muted group-hover:text-ink group-hover:translate-x-0.5 transition-transform">
+                    Begin →
+                  </span>
+                </div>
+                <h4 className="font-extrabold text-ink text-sm">Just Start</h4>
+                <p className="text-xs text-muted">
+                  Begin right away with concept 1: Parts of a whole.
+                </p>
+              </button>
+            </div>
           </div>
         )}
 

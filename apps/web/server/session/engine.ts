@@ -1,5 +1,6 @@
 import {
   CONCEPTS,
+  CONCEPTS_BY_ID,
   CHAPTERS,
   EDGES,
   EXPLANATIONS,
@@ -45,11 +46,15 @@ import {
   type DbClient,
   attempts,
   cohorts,
+  learningSessions,
   users,
 } from "@gaps/db";
 import { and, eq } from "drizzle-orm";
 import type {
+  BossBattleInfoDto,
   ComebackCardDto,
+  ConceptItemDto,
+  ConceptsResponse,
   DueReviewItem,
   GapMapConceptNode,
   GapMapResponse,
@@ -61,6 +66,8 @@ import type {
   RequestHelpRequest,
   RequestHelpResponse,
   RichTextDto,
+  SolveInitRequest,
+  SolveInitResponse,
   StartSessionRequest,
   StartSessionResponse,
   StepDto,
@@ -211,10 +218,421 @@ export async function createStepFromItem(
       input: serializeForDb(gen.input) as ItemViewDto["input"],
       visual: (createdItem.visual as VisualSpecDto) ?? undefined,
     },
-    help: ["hint", "explain", "worked_example"],
+    help: context === "boss" ? [] : ["hint", "explain", "worked_example"],
   };
 
   return { itemInstanceId: createdItem.id, step };
+}
+
+export interface ChapterBossConfig {
+  chapterId: "A" | "B" | "C";
+  name: string;
+  title: string;
+  conceptIds: ConceptId[];
+  requiredCount: number;
+  unlockRuleText: string;
+}
+
+export const CHAPTER_BOSSES: Record<string, ChapterBossConfig> = {
+  A: {
+    chapterId: "A",
+    name: "The Equal Splitter",
+    title: "Chapter A Boss: The Equal Splitter",
+    conceptIds: [
+      "MATH-FRAC-PART",
+      "MATH-FRAC-NUMLINE",
+      "MATH-NUM-HCF",
+      "MATH-FRAC-EQUIV",
+      "MATH-FRAC-SIMPLIFY",
+      "MATH-FRAC-COMPARE",
+      "MATH-FRAC-MIXED",
+    ],
+    requiredCount: 4,
+    unlockRuleText: "Demonstrate or develop at least 4 of 7 Chapter A concepts",
+  },
+  B: {
+    chapterId: "B",
+    name: "The Cross Multiplier",
+    title: "Chapter B Boss: The Cross Multiplier",
+    conceptIds: [
+      "MATH-NUM-LCM",
+      "MATH-FRAC-ADDLIKE",
+      "MATH-FRAC-ADDUNLIKE",
+      "MATH-FRAC-MULT",
+      "MATH-FRAC-DIV",
+    ],
+    requiredCount: 3,
+    unlockRuleText: "Demonstrate or develop at least 3 of 5 Chapter B concepts",
+  },
+  C: {
+    chapterId: "C",
+    name: "The Real-World Riddle",
+    title: "Chapter C Boss: The Real-World Riddle",
+    conceptIds: ["MATH-FRAC-DEC", "MATH-FRAC-WORD"],
+    requiredCount: 1,
+    unlockRuleText: "Demonstrate or develop at least 1 of 2 Chapter C concepts",
+  },
+};
+
+export async function getChapterBosses(
+  studentId: string,
+  db: DbClient = getDb(),
+): Promise<BossBattleInfoDto[]> {
+  const studentRepo = createStudentRepo(studentId, db);
+  const beliefs = await studentRepo.getConceptBeliefs();
+  const beliefMap = new Map<ConceptId, (typeof beliefs)[0]>();
+  for (const b of beliefs) {
+    beliefMap.set(b.conceptId as ConceptId, b);
+  }
+
+  const result: BossBattleInfoDto[] = [];
+
+  for (const [chId, config] of Object.entries(CHAPTER_BOSSES)) {
+    let developingOrMasteredCount = 0;
+    for (const cid of config.conceptIds) {
+      const b = beliefMap.get(cid);
+      if (
+        b &&
+        (b.status === "developing" || b.status === "demonstrated" || b.status === "retained")
+      ) {
+        developingOrMasteredCount++;
+      }
+    }
+
+    const unlocked = developingOrMasteredCount >= config.requiredCount;
+    const lastBattle = await studentRepo.getBossBattle(chId);
+
+    let status: BossBattleInfoDto["status"] = "locked";
+    if (lastBattle?.status === "defeated") {
+      status = "defeated";
+    } else if (unlocked) {
+      status = "ready";
+    }
+
+    result.push({
+      chapterId: chId,
+      name: config.name,
+      title: config.title,
+      unlocked,
+      unlockRule: config.unlockRuleText,
+      status,
+      totalConcepts: config.conceptIds.length,
+      developingOrMasteredCount,
+      lastResult: lastBattle
+        ? {
+            correctN: lastBattle.correctN,
+            totalN: (lastBattle.itemIds as string[])?.length || 8,
+            status: lastBattle.status as "defeated" | "retreated",
+            at: lastBattle.createdAt.toISOString(),
+          }
+        : null,
+    });
+  }
+
+  return result;
+}
+
+export async function startBossBattle(
+  studentId: string,
+  chapterId: string,
+  db: DbClient = getDb(),
+): Promise<StartSessionResponse> {
+  const studentRepo = createStudentRepo(studentId, db);
+  const bosses = await getChapterBosses(studentId, db);
+  const boss = bosses.find((b) => b.chapterId === chapterId);
+  if (!boss) {
+    throw new EngineError(`Unknown chapter ${chapterId}`, 404, "CHAPTER_NOT_FOUND");
+  }
+  if (!boss.unlocked) {
+    throw new EngineError(`Boss battle is locked: ${boss.unlockRule}`, 409, "BOSS_LOCKED");
+  }
+
+  await studentRepo.abandonActiveSessions();
+
+  const config = CHAPTER_BOSSES[chapterId]!;
+  const firstConcept = config.conceptIds[0]!;
+
+  const { itemInstanceId, step } = await createStepFromItem(
+    db,
+    firstConcept,
+    1,
+    undefined,
+    "boss",
+    2,
+  );
+
+  const sessionId = generateDomainId("session");
+  const bossId = generateDomainId("boss");
+
+  const createdSession = await studentRepo.createSession({
+    id: sessionId,
+    mode: "boss",
+    focusConceptId: firstConcept,
+    status: "active",
+    budgetS: 1200,
+    stepSeq: 1,
+    currentStep: serializeForDb(step) as Record<string, unknown>,
+    counters: {
+      bossId,
+      chapterId,
+      totalN: 0,
+      correctN: 0,
+      missedConceptIds: [],
+      itemAssistance: {},
+    },
+  });
+
+  await studentRepo.createBossBattle({
+    id: bossId,
+    chapterId,
+    sessionId,
+    itemIds: [itemInstanceId],
+    correctN: 0,
+    status: "active",
+  });
+
+  return {
+    session: {
+      id: createdSession.id,
+      studentId: createdSession.studentId,
+      mode: "boss",
+      focusConceptId: firstConcept,
+      status: "active",
+      budgetS: createdSession.budgetS,
+      stepSeq: createdSession.stepSeq,
+      startedAt: createdSession.startedAt.toISOString(),
+    },
+    initialStep: step,
+  };
+}
+
+export async function startDailyQuestSession(
+  studentId: string,
+  db: DbClient = getDb(),
+): Promise<StartSessionResponse> {
+  const studentRepo = createStudentRepo(studentId, db);
+  await studentRepo.abandonActiveSessions();
+
+  const quest = await getDailyQuest(studentId, db);
+  const firstSlot = quest.slots.find((s) => !s.completed) ?? quest.slots[0]!;
+  const conceptId = firstSlot.conceptId ?? "MATH-FRAC-PART";
+
+  const { step } = await createStepFromItem(db, conceptId, 1, undefined, "quest");
+
+  const sessionId = generateDomainId("session");
+  const slotIndex = quest.slots.findIndex((s) => s.slotId === firstSlot.slotId);
+
+  const createdSession = await studentRepo.createSession({
+    id: sessionId,
+    mode: "quest",
+    focusConceptId: conceptId,
+    status: "active",
+    budgetS: 600,
+    stepSeq: 1,
+    currentStep: serializeForDb(step) as Record<string, unknown>,
+    counters: {
+      questId: quest.id,
+      slotIndex: Math.max(slotIndex, 0),
+      slots: quest.slots,
+      completedSteps: 0,
+      correctN: 0,
+      itemAssistance: {},
+    },
+  });
+
+  await studentRepo.updateQuest(quest.id, { sessionId });
+
+  return {
+    session: {
+      id: createdSession.id,
+      studentId: createdSession.studentId,
+      mode: "quest",
+      focusConceptId: conceptId,
+      status: "active",
+      budgetS: createdSession.budgetS,
+      stepSeq: createdSession.stepSeq,
+      startedAt: createdSession.startedAt.toISOString(),
+    },
+    initialStep: step,
+  };
+}
+
+export async function startQuickCheckSession(
+  studentId: string,
+  db: DbClient = getDb(),
+): Promise<StartSessionResponse> {
+  const studentRepo = createStudentRepo(studentId, db);
+  await studentRepo.abandonActiveSessions();
+
+  const rawGrade = await getStudentGrade(db, studentId);
+  const grade: 6 | 7 | 8 = rawGrade === 7 || rawGrade === 8 ? rawGrade : 6;
+  const gradeEntry: Record<6 | 7 | 8, ConceptId> = {
+    6: "MATH-FRAC-PART",
+    7: "MATH-FRAC-EQUIV",
+    8: "MATH-FRAC-ADDUNLIKE",
+  };
+  const startConceptId = gradeEntry[grade];
+
+  const { step } = await createStepFromItem(db, startConceptId, 1, undefined, "quick_check", 2);
+
+  const sessionId = generateDomainId("session");
+  const createdSession = await studentRepo.createSession({
+    id: sessionId,
+    mode: "quick_check",
+    focusConceptId: startConceptId,
+    status: "active",
+    budgetS: 600,
+    stepSeq: 1,
+    currentStep: serializeForDb(step) as Record<string, unknown>,
+    counters: {
+      quickCheckState: {
+        grade,
+        tested: [startConceptId],
+        itemCount: 0,
+        lowestMiss: null,
+        highestHit: null,
+        currentConceptId: startConceptId,
+      },
+      completedSteps: 0,
+      correctN: 0,
+      itemAssistance: {},
+    },
+  });
+
+  return {
+    session: {
+      id: createdSession.id,
+      studentId: createdSession.studentId,
+      mode: "quick_check",
+      focusConceptId: startConceptId,
+      status: "active",
+      budgetS: createdSession.budgetS,
+      stepSeq: createdSession.stepSeq,
+      startedAt: createdSession.startedAt.toISOString(),
+    },
+    initialStep: step,
+  };
+}
+
+export async function initSolveWithMe(
+  _studentId: string,
+  req: SolveInitRequest,
+): Promise<SolveInitResponse> {
+  const threadId = `slv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let conceptId: ConceptId = req.conceptId ?? "MATH-FRAC-ADDUNLIKE";
+
+  if (req.text) {
+    const textLower = req.text.toLowerCase();
+    if (textLower.includes("part") || textLower.includes("whole") || textLower.includes("shade")) {
+      conceptId = "MATH-FRAC-PART";
+    } else if (textLower.includes("line")) {
+      conceptId = "MATH-FRAC-NUMLINE";
+    } else if (textLower.includes("equiv") || textLower.includes("equal")) {
+      conceptId = "MATH-FRAC-EQUIV";
+    } else if (textLower.includes("simplify") || textLower.includes("lowest")) {
+      conceptId = "MATH-FRAC-SIMPLIFY";
+    } else if (
+      textLower.includes("compare") ||
+      textLower.includes("greater") ||
+      textLower.includes("smaller")
+    ) {
+      conceptId = "MATH-FRAC-COMPARE";
+    } else if (textLower.includes("mixed") || textLower.includes("improper")) {
+      conceptId = "MATH-FRAC-MIXED";
+    } else if (
+      textLower.includes("multiply") ||
+      textLower.includes("times") ||
+      textLower.includes("product") ||
+      textLower.includes("×") ||
+      textLower.includes("*")
+    ) {
+      conceptId = "MATH-FRAC-MULT";
+    } else if (
+      textLower.includes("divide") ||
+      textLower.includes("division") ||
+      textLower.includes("÷") ||
+      textLower.includes("divided by")
+    ) {
+      conceptId = "MATH-FRAC-DIV";
+    } else if (
+      textLower.includes("add") ||
+      textLower.includes("plus") ||
+      textLower.includes("+") ||
+      textLower.includes("sum")
+    ) {
+      conceptId = "MATH-FRAC-ADDUNLIKE";
+    } else if (
+      textLower.includes("word") ||
+      textLower.includes("problem") ||
+      textLower.includes("share") ||
+      textLower.includes("roti")
+    ) {
+      conceptId = "MATH-FRAC-WORD";
+    } else if (textLower.includes("decimal")) {
+      conceptId = "MATH-FRAC-DEC";
+    }
+  }
+
+  const conceptMeta = CONCEPTS_BY_ID[conceptId] ?? CONCEPTS[0]!;
+  const explanation = EXPLANATIONS[conceptId] ?? EXPLANATIONS["MATH-FRAC-PART"];
+
+  const initialStep: StepDto = {
+    kind: "explanation",
+    stepSeq: 1,
+    route: "picture",
+    body: [...explanation.picture] as RichTextDto,
+    visual: undefined,
+    source: "authored",
+    then: "continue",
+  };
+
+  return {
+    threadId,
+    conceptId,
+    conceptTitle: conceptMeta.studentTitle,
+    restated: req.text
+      ? `Let's work through: "${req.text}"`
+      : `Let's understand: ${conceptMeta.studentTitle}`,
+    problemType: req.problemType ?? "arithmetic",
+    initialStep,
+  };
+}
+
+export async function getConceptsOverview(
+  studentId: string,
+  db: DbClient = getDb(),
+): Promise<ConceptsResponse> {
+  const studentRepo = createStudentRepo(studentId, db);
+  const beliefs = await studentRepo.getConceptBeliefs();
+  const beliefMap = new Map<ConceptId, (typeof beliefs)[0]>();
+  for (const b of beliefs) {
+    beliefMap.set(b.conceptId as ConceptId, b);
+  }
+
+  const chaptersWithConcepts = CHAPTERS.map((ch) => {
+    const chConcepts = CONCEPTS.filter((c) => c.chapterId === ch.id).map((c) => {
+      const b = beliefMap.get(c.id as ConceptId);
+      return {
+        id: c.id as ConceptId,
+        chapterId: ch.id,
+        title: c.title,
+        studentTitle: c.studentTitle,
+        description: c.description,
+        topoOrder: c.topoOrder,
+        status: (b?.status as ConceptItemDto["status"]) ?? "not_assessed",
+      };
+    });
+
+    return {
+      id: ch.id,
+      strand: ch.strand,
+      title: ch.title,
+      ord: ch.ord,
+      concepts: chConcepts,
+    };
+  });
+
+  return { chapters: chaptersWithConcepts };
 }
 
 export async function startLearningSession(
@@ -222,6 +640,18 @@ export async function startLearningSession(
   options: StartSessionRequest,
   db: DbClient = getDb(),
 ): Promise<StartSessionResponse> {
+  if (options.mode === "quest") {
+    return startDailyQuestSession(studentId, db);
+  }
+  if (options.mode === "boss") {
+    const chapterId =
+      (options.focusConceptId && CONCEPTS_BY_ID[options.focusConceptId]?.chapterId) || "A";
+    return startBossBattle(studentId, chapterId, db);
+  }
+  if (options.mode === "quick_check") {
+    return startQuickCheckSession(studentId, db);
+  }
+
   const studentRepo = createStudentRepo(studentId, db);
 
   // Abandon any previous active learning session (invariant: only 1 active session)
@@ -398,13 +828,27 @@ export async function processSessionAttempt(
 
   const misconceptionId = detection.primaryMisconceptionId ?? verifyResult.misconceptionId ?? null;
 
-  // In diagnostic mode, evaluate every item directly on first try without blocking
   const isDiagnostic = session.mode === "diagnostic";
+  const isBoss = session.mode === "boss";
+  const isQuickCheck = session.mode === "quick_check";
+  const isQuest = session.mode === "quest";
+
   const isResolved =
-    isDiagnostic || outcome === "correct" || payload.tryNo >= 2 || outcome === "unparseable";
+    isDiagnostic ||
+    isBoss ||
+    isQuickCheck ||
+    outcome === "correct" ||
+    payload.tryNo >= 2 ||
+    outcome === "unparseable";
   const tryAgain = !isResolved && payload.tryNo === 1;
 
-  // 4. Record Attempt
+  // 4. Server-derived assistance level (never trust client-supplied assistanceLevel alone)
+  const sessionCounters = (session.counters as Record<string, unknown>) ?? {};
+  const itemAssistanceMap = (sessionCounters.itemAssistance as Record<string, number>) ?? {};
+  const serverItemAssistance = itemAssistanceMap[item.id] ?? 0;
+  const effectiveAssistance = Math.max(serverItemAssistance, payload.assistanceLevel ?? 0) as
+    0 | 1 | 2 | 3;
+
   const attemptId = generateDomainId("attempt");
   await studentRepo.recordAttempt({
     id: attemptId,
@@ -417,7 +861,7 @@ export async function processSessionAttempt(
     parsed: (serializeForDb(verifyResult.parsed) as Record<string, unknown>) ?? null,
     outcome,
     misconceptionId,
-    assistanceLevel: payload.assistanceLevel,
+    assistanceLevel: effectiveAssistance,
     tryNo: payload.tryNo,
     isReview: session.mode === "review",
     mode: session.mode,
@@ -431,7 +875,7 @@ export async function processSessionAttempt(
   let sparksAwarded = 0;
   let reconciledMisconceptions: readonly MisconceptionId[] = [];
 
-  if (isResolved && !isDiagnostic) {
+  if (isResolved && !isDiagnostic && !isBoss) {
     // Replay authoritative transitions for this concept over all stored attempts
     const updatedAttempts: CheckedAttempt[] = [
       ...conceptAttempts.map((a) => ({
@@ -462,7 +906,7 @@ export async function processSessionAttempt(
         mode: session.mode as CheckedAttempt["mode"],
         outcome: outcome as CheckedAttempt["outcome"],
         misconceptionId: misconceptionId ? (misconceptionId as MisconceptionId) : undefined,
-        assistance: (payload.assistanceLevel as CheckedAttempt["assistance"]) ?? 0,
+        assistance: effectiveAssistance as CheckedAttempt["assistance"],
         tryNo: (payload.tryNo as CheckedAttempt["tryNo"]) ?? 1,
         isReview: session.mode === "review",
         verifierVersion: (verifyResult.verifierVersion as "verify-1.0") || "verify-1.0",
@@ -482,7 +926,7 @@ export async function processSessionAttempt(
       (existingBelief?.activeMisconceptionIds as MisconceptionId[]) ?? [],
       detection,
       outcome === "correct",
-      payload.assistanceLevel === 0,
+      effectiveAssistance === 0,
     );
 
     await studentRepo.upsertConceptBelief({
@@ -506,7 +950,7 @@ export async function processSessionAttempt(
 
     // Check Sparks
     // +2 for first try correct
-    if (outcome === "correct" && payload.tryNo === 1 && payload.assistanceLevel === 0) {
+    if (outcome === "correct" && payload.tryNo === 1 && effectiveAssistance === 0) {
       const spk = await studentRepo.awardSparks(attemptId, "first_try_correct", 2);
       if (spk.awarded) sparksAwarded += 2;
     }
@@ -698,6 +1142,276 @@ export async function processSessionAttempt(
           diagnosticState: nextDiagState,
           completedSteps,
           correctN,
+        },
+      });
+    }
+  } else if (isBoss) {
+    teachingAction = outcome === "correct" ? "ADVANCE" : "GIVE_HINT";
+    const bossId = currentCounters.bossId as string;
+    const chapterId = (currentCounters.chapterId as string) || "A";
+    const config = CHAPTER_BOSSES[chapterId]!;
+    const correctCount =
+      ((currentCounters.correctN as number) ?? 0) + (outcome === "correct" ? 1 : 0);
+    const totalCount = ((currentCounters.totalN as number) ?? 0) + 1;
+    const missedConceptIds = [...((currentCounters.missedConceptIds as string[]) ?? [])];
+    if (outcome !== "correct") {
+      missedConceptIds.push(item.conceptId);
+    }
+
+    if (totalCount >= 8) {
+      sessionCompleted = true;
+      const isDefeated = correctCount >= 6;
+      const finishSpk = await studentRepo.awardSparks(bossId, "boss_finish", 10);
+      if (finishSpk.awarded) sparksAwarded += 10;
+      if (isDefeated) {
+        const winSpk = await studentRepo.awardSparks(bossId, "boss_win", 40);
+        if (winSpk.awarded) sparksAwarded += 40;
+      }
+
+      await studentRepo.updateBossBattle(bossId, {
+        status: isDefeated ? "defeated" : "retreated",
+        correctN: correctCount,
+      });
+
+      const uniqueMissed = Array.from(new Set(missedConceptIds)) as ConceptId[];
+      const suggestions = uniqueMissed.map((c) => CONCEPTS_BY_ID[c]?.studentTitle ?? c);
+      const note = isDefeated
+        ? `Victory! You defeated ${config.name} with ${correctCount}/8 correct!`
+        : `Good effort! You answered ${correctCount}/8 correctly. Practise ${suggestions.join(", ")} before challenging again.`;
+
+      nextStep = {
+        kind: "summary",
+        stepSeq: session.stepSeq + 1,
+        summary: {
+          itemsAttempted: 8,
+          sparksEarned: sparksAwarded,
+          conceptsUpdated: uniqueMissed.length > 0 ? uniqueMissed : [conceptId],
+          comebackUnlocked: false,
+          note,
+        },
+      };
+
+      await studentRepo.updateSession(sessionId, {
+        status: "completed",
+        endedAt: new Date(),
+        counters: {
+          ...currentCounters,
+          totalN: totalCount,
+          correctN: correctCount,
+          missedConceptIds,
+        },
+      });
+    } else {
+      const nextSeq = session.stepSeq + 1;
+      const nextConcept = config.conceptIds[totalCount % config.conceptIds.length]!;
+      const { itemInstanceId, step } = await createStepFromItem(
+        db,
+        nextConcept,
+        nextSeq,
+        undefined,
+        "boss",
+        2,
+      );
+      nextStep = step;
+
+      const currentBoss = await studentRepo.getBossBattle(chapterId);
+      if (currentBoss) {
+        await studentRepo.updateBossBattle(bossId, {
+          itemIds: [...(currentBoss.itemIds ?? []), itemInstanceId],
+        });
+      }
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(step) as Record<string, unknown>,
+        counters: {
+          ...currentCounters,
+          totalN: totalCount,
+          correctN: correctCount,
+          missedConceptIds,
+        },
+      });
+    }
+  } else if (isQuest) {
+    teachingAction = outcome === "correct" ? "ADVANCE" : "GIVE_HINT";
+    const questId = currentCounters.questId as string;
+    const slotIndex = (currentCounters.slotIndex as number) ?? 0;
+    const questSlots = [...((currentCounters.slots as QuestSlot[]) ?? [])];
+
+    if (questSlots[slotIndex]) {
+      questSlots[slotIndex] = { ...questSlots[slotIndex]!, completed: true };
+      await studentRepo.updateQuest(questId, {
+        slots: questSlots as unknown as Record<string, unknown>[],
+      });
+    }
+
+    const nextSlotIndex = slotIndex + 1;
+    if (nextSlotIndex >= questSlots.length) {
+      sessionCompleted = true;
+      await studentRepo.updateQuest(questId, {
+        status: "completed",
+        completedAt: new Date(),
+      });
+
+      const qSpk = await studentRepo.awardSparks(questId, "quest", 20);
+      if (qSpk.awarded) sparksAwarded += 20;
+
+      nextStep = {
+        kind: "summary",
+        stepSeq: session.stepSeq + 1,
+        summary: {
+          itemsAttempted: questSlots.length,
+          sparksEarned: sparksAwarded,
+          conceptsUpdated: [conceptId],
+          comebackUnlocked: false,
+          note: "Brilliant! You completed today's Daily Quest and earned +20 Sparks!",
+        },
+      };
+
+      await studentRepo.updateSession(sessionId, {
+        status: "completed",
+        endedAt: new Date(),
+        counters: {
+          ...currentCounters,
+          slotIndex: nextSlotIndex,
+          slots: questSlots,
+        },
+      });
+    } else {
+      const nextSeq = session.stepSeq + 1;
+      const nextSlot = questSlots[nextSlotIndex]!;
+      const nextConcept = nextSlot.conceptId ?? conceptId;
+      const { step } = await createStepFromItem(db, nextConcept, nextSeq, undefined, "quest");
+      nextStep = step;
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(step) as Record<string, unknown>,
+        counters: {
+          ...currentCounters,
+          slotIndex: nextSlotIndex,
+          slots: questSlots,
+        },
+      });
+    }
+  } else if (isQuickCheck) {
+    teachingAction = outcome === "correct" ? "ADVANCE" : "REVIEW_PREREQUISITE";
+    const qcState = (currentCounters.quickCheckState as {
+      grade: 6 | 7 | 8;
+      tested: ConceptId[];
+      itemCount: number;
+      lowestMiss: ConceptId | null;
+      highestHit: ConceptId | null;
+      currentConceptId: ConceptId;
+    }) ?? {
+      grade: 6,
+      tested: [conceptId],
+      itemCount: 0,
+      lowestMiss: null,
+      highestHit: null,
+      currentConceptId: conceptId,
+    };
+
+    const isHit = outcome === "correct";
+    const currentConceptMeta = CONCEPTS_BY_ID[conceptId];
+    const currentTopo = currentConceptMeta?.topoOrder ?? 1;
+
+    let lowestMiss = qcState.lowestMiss;
+    let highestHit = qcState.highestHit;
+
+    if (isHit) {
+      if (!highestHit || (CONCEPTS_BY_ID[highestHit]?.topoOrder ?? 0) < currentTopo) {
+        highestHit = conceptId;
+      }
+    } else {
+      if (!lowestMiss || (CONCEPTS_BY_ID[lowestMiss]?.topoOrder ?? 999) > currentTopo) {
+        lowestMiss = conceptId;
+      }
+    }
+
+    const itemCount = qcState.itemCount + 1;
+    const tested = [...qcState.tested, conceptId];
+
+    let nextConceptId: ConceptId | null = null;
+    if (itemCount < 5) {
+      if (isHit) {
+        const candidate = CONCEPTS.find(
+          (c) => c.topoOrder === currentTopo + 2 && !tested.includes(c.id as ConceptId),
+        );
+        nextConceptId = candidate ? (candidate.id as ConceptId) : null;
+      } else {
+        const prereqEdge = EDGES.find(
+          (e) => e.conceptId === conceptId && !tested.includes(e.prereqId as ConceptId),
+        );
+        nextConceptId = prereqEdge ? (prereqEdge.prereqId as ConceptId) : null;
+      }
+    }
+
+    if (nextConceptId && itemCount < 5) {
+      const nextSeq = session.stepSeq + 1;
+      const { step } = await createStepFromItem(
+        db,
+        nextConceptId,
+        nextSeq,
+        undefined,
+        "quick_check",
+        2,
+      );
+      nextStep = step;
+
+      await studentRepo.updateSession(sessionId, {
+        stepSeq: nextSeq,
+        currentStep: serializeForDb(step) as Record<string, unknown>,
+        counters: {
+          ...currentCounters,
+          quickCheckState: {
+            grade: qcState.grade,
+            tested,
+            itemCount,
+            lowestMiss,
+            highestHit,
+            currentConceptId: nextConceptId,
+          },
+        },
+      });
+    } else {
+      sessionCompleted = true;
+      const gradeEntry: Record<6 | 7 | 8, ConceptId> = {
+        6: "MATH-FRAC-PART",
+        7: "MATH-FRAC-EQUIV",
+        8: "MATH-FRAC-ADDUNLIKE",
+      };
+      const recStart: ConceptId =
+        lowestMiss ?? highestHit ?? gradeEntry[qcState.grade] ?? "MATH-FRAC-PART";
+
+      await studentRepo.updateStudentState({
+        focusConceptId: recStart,
+        startConceptId: recStart,
+      });
+
+      nextStep = {
+        kind: "summary",
+        stepSeq: session.stepSeq + 1,
+        summary: {
+          itemsAttempted: itemCount,
+          sparksEarned: sparksAwarded,
+          conceptsUpdated: [recStart],
+          comebackUnlocked: false,
+          note: `Quick Check complete! We found your starting point: ${CONCEPTS_BY_ID[recStart]?.studentTitle ?? recStart}.`,
+        },
+      };
+
+      await studentRepo.updateSession(sessionId, {
+        status: "completed",
+        endedAt: new Date(),
+        counters: {
+          ...currentCounters,
+          quickCheckState: {
+            ...qcState,
+            itemCount,
+            lowestMiss,
+            highestHit,
+          },
         },
       });
     }
@@ -978,40 +1692,61 @@ export async function requestSessionHelp(
     throw new EngineError("Item not found", 404);
   }
 
+  let computedAssistanceLevel = 1;
+  let responsePayload: RequestHelpResponse;
+
   if (req.kind === "hint") {
     const hints = (item.hints as unknown[]) ?? [];
     const rungIndex = Math.min(Math.max((req.rung ?? 1) - 1, 0), hints.length - 1);
     const hintContent = hints[rungIndex] ?? [{ t: "text", v: "Read the prompt carefully." }];
-
-    return {
+    computedAssistanceLevel = rungIndex + 1;
+    responsePayload = {
       kind: "hint",
       content: hintContent,
-      assistanceLevel: rungIndex + 1,
+      assistanceLevel: computedAssistanceLevel,
     };
-  }
-
-  if (req.kind === "worked_example") {
-    return {
+  } else if (req.kind === "worked_example") {
+    computedAssistanceLevel = 3;
+    responsePayload = {
       kind: "worked_example",
       content: item.workedExample,
       assistanceLevel: 3,
     };
-  }
-
-  if (req.kind === "explanation") {
+  } else if (req.kind === "explanation") {
     const conceptId = item.conceptId as ConceptId;
     const explanation = EXPLANATIONS[conceptId] ?? EXPLANATIONS["MATH-FRAC-PART"];
     const route = req.route ?? "picture";
     const content = explanation[route];
-
-    return {
+    computedAssistanceLevel = 2;
+    responsePayload = {
       kind: "explanation",
       content,
       assistanceLevel: 2,
     };
+  } else {
+    throw new EngineError("Unsupported help kind", 400);
   }
 
-  throw new EngineError("Unsupported help kind", 400);
+  // Authoritatively record assistance on current item in session counters
+  const counters = (session.counters as Record<string, unknown>) ?? {};
+  const itemAssistance = (counters.itemAssistance as Record<string, number>) ?? {};
+  const currentAssistance = itemAssistance[item.id] ?? 0;
+  const updatedItemAssistance = {
+    ...itemAssistance,
+    [item.id]: Math.max(currentAssistance, computedAssistanceLevel),
+  };
+
+  await db
+    .update(learningSessions)
+    .set({
+      counters: serializeForDb({
+        ...counters,
+        itemAssistance: updatedItemAssistance,
+      }) as Record<string, unknown>,
+    })
+    .where(eq(learningSessions.id, sessionId));
+
+  return responsePayload;
 }
 
 export async function getDailyQuest(studentId: string, db: DbClient = getDb()): Promise<QuestDto> {
@@ -1112,6 +1847,16 @@ export async function getHomeDashboard(
       }
     : null;
 
+  const activeSessionRow = await studentRepo.getActiveSession();
+  const activeSession = activeSessionRow
+    ? {
+        id: activeSessionRow.id,
+        mode: activeSessionRow.mode,
+        focusConceptId: (activeSessionRow.focusConceptId as ConceptId) ?? null,
+        stepSeq: activeSessionRow.stepSeq,
+      }
+    : null;
+
   return {
     student: {
       id: profile.id,
@@ -1127,6 +1872,7 @@ export async function getHomeDashboard(
     dailyQuest,
     dueReviews: dueReviewItems,
     recentComebackCard: recentCard,
+    activeSession,
   };
 }
 

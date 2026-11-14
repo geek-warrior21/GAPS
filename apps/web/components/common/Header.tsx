@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 interface HeaderProps {
   displayName?: string;
@@ -11,6 +11,7 @@ interface HeaderProps {
 
 export function Header({ displayName, sparksTotal = 0 }: HeaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
 
   const handleLogout = async () => {
     try {
@@ -23,18 +24,50 @@ export function Header({ displayName, sparksTotal = 0 }: HeaderProps) {
     }
   };
 
+  const navLinks = [
+    { label: "Home", href: "/home" },
+    { label: "Learn", href: "/learn" },
+    { label: "Play", href: "/play" },
+    { label: "GapMap", href: "/gapmap" },
+    { label: "Solve With Me", href: "/solve" },
+  ];
+
   return (
     <header className="bg-surface border-b border-line sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        <Link
-          href="/home"
-          className="flex items-center gap-2.5 font-extrabold text-xl text-primary-ink"
-        >
-          <span className="w-8 h-8 rounded-xl bg-primary text-white flex items-center justify-center text-base shadow-xs">
-            G
-          </span>
-          <span className="tracking-tight">Gaps</span>
-        </Link>
+      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-6">
+          <Link
+            href="/home"
+            className="flex items-center gap-2.5 font-extrabold text-xl text-primary-ink shrink-0"
+          >
+            <span className="w-8 h-8 rounded-xl bg-primary text-white flex items-center justify-center text-base shadow-xs">
+              G
+            </span>
+            <span className="tracking-tight">Gaps</span>
+          </Link>
+
+          {/* Desktop Navigation */}
+          {displayName && (
+            <nav className="hidden md:flex items-center gap-1">
+              {navLinks.map((item) => {
+                const isActive = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                      isActive
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted hover:text-ink hover:bg-surface-2"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
+        </div>
 
         <div className="flex items-center gap-3">
           {displayName && (
@@ -45,7 +78,7 @@ export function Header({ displayName, sparksTotal = 0 }: HeaderProps) {
           )}
 
           {displayName && (
-            <div className="text-sm font-bold text-ink hidden sm:block">{displayName}</div>
+            <div className="text-sm font-bold text-ink hidden lg:block">{displayName}</div>
           )}
 
           {displayName ? (
@@ -66,6 +99,26 @@ export function Header({ displayName, sparksTotal = 0 }: HeaderProps) {
           )}
         </div>
       </div>
+
+      {/* Mobile Navigation bar */}
+      {displayName && (
+        <nav className="flex md:hidden items-center justify-around border-t border-line/60 px-2 py-1.5 bg-surface-2/40 overflow-x-auto">
+          {navLinks.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
+                  isActive ? "bg-primary text-white shadow-2xs" : "text-muted hover:text-ink"
+                }`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
     </header>
   );
 }

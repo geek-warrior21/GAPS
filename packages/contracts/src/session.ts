@@ -145,6 +145,15 @@ export const HomeDashboardResponseSchema = z.object({
   dailyQuest: QuestDtoSchema,
   dueReviews: z.array(DueReviewItemSchema),
   recentComebackCard: ComebackCardDtoSchema.nullable().optional(),
+  activeSession: z
+    .object({
+      id: z.string(),
+      mode: z.string(),
+      focusConceptId: ConceptIdSchema.nullable().optional(),
+      stepSeq: z.number(),
+    })
+    .nullable()
+    .optional(),
 });
 export type HomeDashboardResponse = z.infer<typeof HomeDashboardResponseSchema>;
 
@@ -183,3 +192,71 @@ export const GapMapResponseSchema = z.object({
   }),
 });
 export type GapMapResponse = z.infer<typeof GapMapResponseSchema>;
+
+export const ConceptItemSchema = z.object({
+  id: ConceptIdSchema,
+  chapterId: z.string(),
+  title: z.string(),
+  studentTitle: z.string(),
+  description: z.string(),
+  topoOrder: z.number(),
+  status: z.enum(["not_assessed", "needs_support", "developing", "demonstrated", "retained"]),
+});
+export type ConceptItemDto = z.infer<typeof ConceptItemSchema>;
+
+export const ChapterWithConceptsSchema = z.object({
+  id: z.string(),
+  strand: z.string(),
+  title: z.string(),
+  ord: z.number(),
+  concepts: z.array(ConceptItemSchema),
+});
+export type ChapterWithConceptsDto = z.infer<typeof ChapterWithConceptsSchema>;
+
+export const ConceptsResponseSchema = z.object({
+  chapters: z.array(ChapterWithConceptsSchema),
+});
+export type ConceptsResponse = z.infer<typeof ConceptsResponseSchema>;
+
+export const BossBattleInfoSchema = z.object({
+  chapterId: z.string(),
+  name: z.string(),
+  title: z.string(),
+  unlocked: z.boolean(),
+  unlockRule: z.string(),
+  status: z.enum(["locked", "ready", "defeated", "retreated"]),
+  totalConcepts: z.number(),
+  developingOrMasteredCount: z.number(),
+  lastResult: z
+    .object({
+      correctN: z.number(),
+      totalN: z.number(),
+      status: z.enum(["defeated", "retreated"]),
+      at: z.string(),
+    })
+    .nullable()
+    .optional(),
+});
+export type BossBattleInfoDto = z.infer<typeof BossBattleInfoSchema>;
+
+export const BossesResponseSchema = z.object({
+  bosses: z.array(BossBattleInfoSchema),
+});
+export type BossesResponse = z.infer<typeof BossesResponseSchema>;
+
+export const SolveInitRequestSchema = z.object({
+  text: z.string().max(500).optional(),
+  conceptId: ConceptIdSchema.optional(),
+  problemType: z.enum(["arithmetic", "word_problem"]).default("arithmetic"),
+});
+export type SolveInitRequest = z.infer<typeof SolveInitRequestSchema>;
+
+export const SolveInitResponseSchema = z.object({
+  threadId: z.string(),
+  conceptId: ConceptIdSchema,
+  conceptTitle: z.string(),
+  restated: z.string(),
+  problemType: z.enum(["arithmetic", "word_problem"]),
+  initialStep: StepSchema,
+});
+export type SolveInitResponse = z.infer<typeof SolveInitResponseSchema>;
