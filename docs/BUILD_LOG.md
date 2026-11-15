@@ -769,3 +769,78 @@ Failing regressions were added in `packages/domain/src/regressions.test.ts` prio
 - **Vitest Unit & Integration Tests:** **41 test files, 277 tests passing** (100% pass rate).
 - **Playwright E2E Tests:** **13 scenarios, 26 test runs passing** across Desktop Chrome and Mobile Chrome.
 - **Full Verification Gate (`pnpm verify`):** Passed cleanly (typecheck, lint, format:check, content:check, db:migrate, db:seed, unit tests, build, and test:e2e).
+
+## Phase 10 — Adaptive Teaching Loop & Remediation Intelligence (2026-11-15)
+
+### 1. Scope & Objective
+
+Implement an evidence-driven adaptive loop through the shared lesson engine for Mathematics (Fractions) and Science (Circuits):
+
+- Detect misunderstandings on predictions or checks and branch into targeted explanations and relevant interactive activities.
+- Provide a fresh follow-up question checking the exact same objective.
+- Enable successful independent responses to resume linear progression while directing continued difficulty to a clear, supportive stopping point.
+- Persist branch decisions and assistance status across page reloads/reconnects.
+- Strictly uphold Invariant §3 and Rule F.1: Exploration, completion, or single correct responses never alter concept beliefs or fabricate mastery.
+
+### 2. Built
+
+1. **Contracts & Schemas (`packages/contracts/src/lesson.ts`):**
+   - Added `stopping_point` activity type and `StoppingPointConfigSchema` (`headline`, `body`, `recommendation`, `keyTakeaways`).
+   - Added `RemediationBranchSchema` and recursive `LessonActivitySchema` (`branchId`, `triggerCondition`, `targetedExplanation`, `remediationActivity`, `followUpCheck`, `stoppingPoint`).
+   - Added `ActiveBranchStageSchema` (`"remediation_activity" | "followup_check" | "stopping_point"`) and `ActiveBranchStateSchema`.
+   - Extended `LessonSessionResponse` and `LessonRespondResponse` with `activeActivity`, `activeBranch`, and `assistanceStatus`.
+   - Contract test suite: added validation tests for adaptive remediation branches and stopping points (`packages/contracts/src/lesson.test.ts`).
+
+2. **Authored Curriculum Remediation (`packages/content/src/lessons/`):**
+   - **Maths (`lesson-maths-frac-part-1`):** Attached adaptive remediation branch to `act_3_predict`:
+     - Targeted explanation clarifying denominator as the count of total equal pieces in one whole.
+     - Remediation activity (`act_3_remediation_sim`): Interactive 4-part partition strip.
+     - Fresh follow-up check (`act_3_remediation_fresh_check`): Meera eating 1 quarter of a roti (evaluates to `1/4`).
+     - Supportive stopping point (`act_3_stopping_point`): "Pause & Reflect: Parts of a Whole" with key takeaways on counting total parts first.
+   - **Science (`lesson-sci-circuits-1`):** Attached adaptive remediation branch to `act_3_predict`:
+     - Targeted explanation explaining why electrons cannot cross the open switch air gap.
+     - Remediation activity (`act_3_remediation_sim`): Interactive sandbox focusing on the air gap.
+     - Fresh follow-up check (`act_3_remediation_fresh_check`): Disconnecting wire from terminal (bulb stays dark).
+     - Supportive stopping point (`act_3_stopping_point`): "Pause & Reflect: Circuit Loops" reviewing closed-loop rules.
+
+3. **Adaptive Lesson Engine Service (`apps/web/server/lesson/service.ts`):**
+   - Implemented `resolveActiveActivity` mapping `activeBranch.stage` to `remediationActivity`, `followUpCheck`, or `stoppingPoint`.
+   - Updated `startOrResumeLessonSession` and `getLessonSession` to restore active branch activities and assistance state on session resume/reload.
+   - Enhanced `submitLessonActivityResponse`:
+     - On incorrect attempt on an activity with authored remediation: triggers branch, logs `lesson_branch_triggered`, records `assistanceStatus = "assisted"`, and returns `remediationActivity` without incrementing `currentActivityIndex`.
+     - Stage 1 (`remediation_activity`): logs `lesson_remediation_activity_explored` and advances branch to `followup_check`.
+     - Stage 2 (`followup_check`): logs `lesson_remediation_check`. If correct, records `assistanceStatus = "remediated"`, clears `activeBranch`, and advances to next main activity. If incorrect, records `assistanceStatus = "needs_support"` and transitions to `stopping_point`.
+     - Stage 3 (`stopping_point`): logs `lesson_stopping_point_acknowledged`, clears `activeBranch`, and advances to the next activity with scaffolded support.
+
+4. **Adaptive UI & Activity Renderer (`apps/web/components/lesson/`):**
+   - `LessonActivityRenderer.tsx`: Added renderer for `stopping_point` with reflection card, key takeaways bullet list, recommendation panel, and acknowledgment button. Updated `independent_check` action button labels.
+   - `LessonPlayer.tsx`: Renders `activeActivity` dynamically, displays "Adaptive Support" status badge in header, provides real-time guidance banner, and tracks active branch step.
+
+5. **Testing & Verification:**
+   - `apps/web/server/lesson.test.ts`: Added 5 comprehensive integration tests covering:
+     - Maths struggling-student path (incorrect prediction -> remediation sim -> incorrect fresh check -> stopping point -> completion).
+     - Maths successful-student path after remediation (incorrect prediction -> remediation sim -> correct fresh check -> progression).
+     - Science struggling-student path (open switch misconception -> air gap remediation -> incorrect fresh check -> stopping point).
+     - Science successful-student path after air gap remediation.
+     - Refresh recovery verification at each branch stage.
+     - Audit proving structured evidence recording in `events` and non-fabrication of `concept_beliefs` mastery.
+   - `apps/web/e2e/student-journey.spec.ts`: Added Playwright E2E scenarios S14 (Maths adaptive loop with refresh recovery) and S15 (Science adaptive loop with successful resolution).
+
+### 3. Learner Model Evidence Status & Remaining Gap
+
+- **Current Status:**
+  - Every interaction in the adaptive lesson loop is captured as an immutable event in PostgreSQL (`events` table) with structured metadata: `lesson_prediction_submitted`, `lesson_branch_triggered`, `lesson_remediation_activity_explored`, `lesson_remediation_check`, `lesson_stopping_point_acknowledged`, `lesson_guided_practice`, and `lesson_independent_check`.
+  - Invariant §3 & Rule F.1 are strictly preserved: Interactive exploration, lesson completion, and single check answers NEVER promote `concept_beliefs` to mastery.
+- **Remaining Gap:**
+  - In Gaps V0.1, concept mastery promotion is governed by the pure domain `beliefReducer` evaluating independent multi-template practice attempts (`attempts` table) with strict demonstration windows (e.g. 3 consecutive correct across >= 2 reviewed templates).
+  - Lesson independent checks currently log evidence to `events` rather than emitting formal curriculum `attempt` records. To feed lesson checks directly into the learner model's `pMastery`, lesson assessment items will need to be bound to registered template IDs or converted to formative evidence inputs in the belief reducer pipeline.
+
+### 4. Verification Results
+
+- **`pnpm typecheck`:** 6/6 workspace projects passed.
+- **`pnpm lint`:** 0 errors, 0 warnings.
+- **`pnpm format:check`:** All files match Prettier code style.
+- **`pnpm content:check`:** 42 templates verified across 500 seeds each (acyclic, distinct >= 20, zero hint leaks).
+- **`pnpm test` (`vitest`):** 41 test files, 283 tests passed (100% pass rate).
+- **Line coverage:** `packages/domain` line coverage >= 93.7%.
+- **`pnpm test:e2e` (`playwright`):** 15 scenarios, 30 tests passed across Desktop Chrome and Mobile Chrome.

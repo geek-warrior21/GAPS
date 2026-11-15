@@ -544,4 +544,198 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page.getByText("Lesson Concluded")).toBeVisible();
     await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
   });
+
+  test("S14: Mathematics adaptive loop: struggling student triggers remediation, fresh check, stopping point, and refresh recovery", async ({
+    page,
+  }) => {
+    // 1. Sign in as Aarav
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "aarav");
+    await page.fill("#pin", "121212");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn and launch Fractions lesson
+    await page.goto("/learn");
+    await expect(page).toHaveURL(/\/learn/);
+
+    const launchMathsBtn = page.locator("[data-testid='start-maths-lesson-button']");
+    await expect(launchMathsBtn).toBeVisible();
+    await launchMathsBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
+
+    // Step 1: Intro
+    await expect(page.getByText("Concept Introduction", { exact: true })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Step 2: Interactive Exploration
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Wait until Activity 3 Predict & Observe has loaded
+    await expect(page.getByText("ACTIVITY 3 OF 5")).toBeVisible();
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+
+    // Student makes INCORRECT prediction (4/3 instead of 3/4)
+    const incorrectChoice = page.locator("button:has-text('4/3 (four-thirds)')");
+    await expect(incorrectChoice).toBeVisible();
+    await incorrectChoice.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // ADAPTIVE TRIGGER 1: Remediation simulation is displayed
+    await expect(page.getByText("Adaptive Support")).toBeVisible();
+    await expect(page.getByText("Targeted remediation active", { exact: false })).toBeVisible();
+    await expect(page.getByText("Guided Investigation: Denominator as Equal Parts")).toBeVisible();
+
+    // REFRESH RECOVERY 1: Mid-remediation simulation
+    await page.reload();
+    await expect(page.getByText("Adaptive Support")).toBeVisible();
+    await expect(page.getByText("Guided Investigation: Denominator as Equal Parts")).toBeVisible();
+
+    // Complete remediation simulation
+    await page.click("button:has-text('Next Step')");
+
+    // ADAPTIVE TRIGGER 2: Fresh Follow-Up Check
+    await expect(page.getByText("Fresh Question: Parts of a Whole")).toBeVisible();
+    await expect(
+      page.getByText("A round roti is divided into 4 equal quarters", { exact: false }),
+    ).toBeVisible();
+
+    // REFRESH RECOVERY 2: Mid-follow-up check
+    await page.reload();
+    await expect(page.getByText("Fresh Question: Parts of a Whole")).toBeVisible();
+
+    // Student answers fresh question INCORRECTLY (4/1 four rotis)
+    const wrongFreshChoice = page.locator("button:has-text('4/1 (four rotis)')");
+    await expect(wrongFreshChoice).toBeVisible();
+    await wrongFreshChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Good Try — Learning Opportunity")).toBeVisible();
+    await page.click("button:has-text('Submit & Continue')");
+
+    // ADAPTIVE TRIGGER 3: Stopping Point reached for continued difficulty
+    await expect(page.getByText("Support & Reflection")).toBeVisible();
+    await expect(page.getByText("Let's Pause & Review Key Ideas")).toBeVisible();
+    await expect(
+      page.getByText("Always count the total equal parts first", { exact: false }),
+    ).toBeVisible();
+
+    // REFRESH RECOVERY 3: Mid-stopping point
+    await page.reload();
+    await expect(page.getByText("Support & Reflection")).toBeVisible();
+    await expect(page.getByText("Let's Pause & Review Key Ideas")).toBeVisible();
+
+    // Acknowledge stopping point and proceed
+    await page.click("button:has-text('Acknowledge & Continue')");
+
+    // Successfully resumes mainstream at Step 4 Guided Challenge
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    const plusParts = page.locator("button[aria-label='Increase parts']");
+    await plusParts.click();
+    await plusParts.click();
+    const plusShaded = page.locator("button[aria-label='Increase shaded parts']");
+    await plusShaded.click();
+    await page.click("button:has-text('Check Solution')");
+    await expect(page.getByText("Goal Achieved!")).toBeVisible();
+    await page.click("button:has-text('Continue')");
+
+    // Step 5: Final Independent Check
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    const choice56 = page.locator("button:has-text('5/6')");
+    await expect(choice56).toBeVisible();
+    await choice56.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Verify Completion Screen
+    await expect(page.getByText("Lesson Concluded")).toBeVisible();
+    await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
+  });
+
+  test("S15: Science adaptive loop: circuit remediation and successful fresh check progression", async ({
+    page,
+  }) => {
+    // 1. Sign in as Ananya
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "ananya");
+    await page.fill("#pin", "555555");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn -> Science
+    await page.goto("/learn");
+    const scienceTab = page.locator("[data-testid='tab-subject-science']");
+    await expect(scienceTab).toBeVisible();
+    await scienceTab.click();
+
+    // 3. Launch Circuits Lesson
+    const launchBtn = page.locator("[data-testid='start-circuits-lesson-button']");
+    await expect(launchBtn).toBeVisible();
+    await launchBtn.click();
+
+    // Step 1: Intro & Step 2: Interactive Sandbox
+    await expect(page.getByText("Concept Introduction", { exact: true })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Step 3: Predict & Observe: Make INCORRECT prediction
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+    const wrongPredict = page.locator(
+      "button:has-text('Yes, the bulb will glow because the battery is still attached.')",
+    );
+    await expect(wrongPredict).toBeVisible();
+    await wrongPredict.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // Remediation Branch: Air gap simulator
+    await expect(page.getByText("Adaptive Support")).toBeVisible();
+    await expect(
+      page.getByText("Guided Investigation: The Air Gap in an Open Circuit"),
+    ).toBeVisible();
+
+    // Complete remediation simulation
+    await page.click("button:has-text('Next Step')");
+
+    // Fresh Check: Student answers CORRECTLY
+    await expect(page.getByText("Fresh Check: Circuit Continuity")).toBeVisible();
+    const correctFresh = page.locator(
+      "button:has-text('Current stops flowing and the bulb stays dark')",
+    );
+    await expect(correctFresh).toBeVisible();
+    await correctFresh.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Submit & Continue')");
+
+    // Advances to Guided Challenge
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    const guidedSwitch = page.getByTestId("toggle-circuit-switch");
+    await expect(guidedSwitch).toBeVisible();
+    await guidedSwitch.click();
+    await page.click("button:has-text('Check Solution')");
+    await expect(page.getByText("Goal Achieved!")).toBeVisible();
+    await page.click("button:has-text('Continue')");
+
+    // Final Independent Check
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    const finalChoice = page.locator("button:has-text('A complete, closed conducting loop')");
+    await expect(finalChoice).toBeVisible();
+    await finalChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Verify Completion Screen
+    await expect(page.getByText("Lesson Concluded")).toBeVisible();
+    await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
+  });
 });

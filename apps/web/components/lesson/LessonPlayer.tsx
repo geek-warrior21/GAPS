@@ -17,7 +17,9 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const { lesson, currentActivityIndex, isCompleted } = sessionData;
-  const currentActivity = lesson.activities[currentActivityIndex];
+  const currentActivity = sessionData.activeActivity ?? lesson.activities[currentActivityIndex];
+  const isFinalActivity =
+    currentActivityIndex + 1 >= lesson.activities.length && !sessionData.activeBranch;
 
   const handleRespond = async (response: unknown) => {
     if (!currentActivity) return;
@@ -44,7 +46,11 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
       setSessionData((prev) => ({
         ...prev,
         currentActivityIndex: result.nextActivityIndex,
-        completedActivities: [...prev.completedActivities, currentActivity.id],
+        activeActivity: result.activeActivity,
+        activeBranch: result.activeBranch,
+        completedActivities: prev.completedActivities.includes(currentActivity.id)
+          ? prev.completedActivities
+          : [...prev.completedActivities, currentActivity.id],
         isCompleted: result.isCompleted,
         sparksAwarded: (prev.sparksAwarded ?? 0) + result.sparksAwarded,
       }));
@@ -85,10 +91,17 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-900 border border-amber-500/20 rounded-full text-xs font-black">
-              <span>✨</span>
-              <span>+15 Sparks</span>
-            </div>
+            {sessionData.activeBranch ? (
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-900 border border-amber-500/20 rounded-full text-xs font-black">
+                <span>🎯</span>
+                <span>Adaptive Support</span>
+              </div>
+            ) : (
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-900 border border-amber-500/20 rounded-full text-xs font-black">
+                <span>✨</span>
+                <span>+15 Sparks</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -99,7 +112,13 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
               ACTIVITY {Math.min(currentActivityIndex + 1, lesson.activities.length)} OF{" "}
               {lesson.activities.length}
             </span>
-            <span>{isCompleted ? "COMPLETED" : currentActivity?.title}</span>
+            {sessionData.activeBranch ? (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-900 font-black text-2xs uppercase">
+                Remediation: {sessionData.activeBranch.stage.replace("_", " ")}
+              </span>
+            ) : (
+              <span>{isCompleted ? "COMPLETED" : currentActivity?.title}</span>
+            )}
           </div>
 
           <div className="grid grid-flow-col auto-cols-fr gap-2">
@@ -135,6 +154,22 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
             >
               ✕
             </button>
+          </div>
+        )}
+
+        {/* Adaptive Remediation Indicator */}
+        {sessionData.activeBranch && (
+          <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-between text-amber-900 animate-fade-in">
+            <div className="flex items-center gap-2">
+              <span className="text-base">💡</span>
+              <span className="text-xs font-extrabold">
+                Targeted remediation active: addressing misconception with hands-on practice & fresh
+                check
+              </span>
+            </div>
+            <span className="text-2xs font-black uppercase tracking-wider bg-amber-200/80 px-2.5 py-1 rounded-lg">
+              Step: {sessionData.activeBranch.stage.replace("_", " ")}
+            </span>
           </div>
         )}
 
@@ -198,6 +233,7 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
             activity={currentActivity}
             isSubmitting={isSubmitting}
             onRespond={handleRespond}
+            isFinalActivity={isFinalActivity}
           />
         ) : (
           <div className="p-8 bg-surface rounded-3xl border border-line text-center space-y-4">

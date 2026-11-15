@@ -81,6 +81,69 @@ export const MATHS_FRAC_PART_LESSON: LessonPlan = {
             "The bottom number (denominator, 4) counts the total equal parts in 1 whole. The top number (numerator, 3) counts the shaded parts we have.",
         },
       },
+      remediation: {
+        branchId: "branch_maths_predict_remediation",
+        triggerCondition: "incorrect_prediction",
+        targetedExplanation:
+          "Remember: the bottom number (denominator) always tells us how many equal pieces make up 1 whole. Slicing a bar into 4 equal pieces means the bottom number must be 4! Let's explore this on an interactive 4-part bar.",
+        remediationActivity: {
+          id: "act_3_remediation_sim",
+          type: "interactive_manipulation",
+          title: "Guided Investigation: Denominator as Equal Parts",
+          instructions: "Notice how the denominator stays 4 as you toggle shaded slices.",
+          config: {
+            type: "interactive_manipulation",
+            simulation: {
+              simulationKind: "fraction_strip",
+              initialParts: 4,
+              initialShaded: 2,
+              allowChangeParts: false,
+              allowChangeShaded: true,
+              minParts: 4,
+              maxParts: 4,
+              instruction: "Notice how the denominator stays 4 as you toggle shaded parts.",
+            },
+          },
+        },
+        followUpCheck: {
+          id: "act_3_remediation_fresh_check",
+          type: "independent_check",
+          title: "Fresh Question: Parts of a Whole",
+          instructions: "Demonstrate your understanding with this fresh question.",
+          config: {
+            type: "independent_check",
+            prompt:
+              "A round roti is divided into 4 equal quarters. Meera eats 1 quarter. What fraction of the roti did Meera eat?",
+            questionType: "choice",
+            choices: [
+              { id: "fresh_1_4", text: "1/4 (one-fourth)" },
+              { id: "fresh_4_1", text: "4/1 (four rotis)" },
+              { id: "fresh_3_4", text: "3/4 (three-fourths)" },
+              { id: "fresh_1_3", text: "1/3 (one-third)" },
+            ],
+            correctAnswer: "fresh_1_4",
+            explanation:
+              "The roti is cut into 4 equal parts in total (denominator = 4), and Meera ate 1 part (numerator = 1). Therefore, she ate 1/4.",
+          },
+        },
+        stoppingPoint: {
+          id: "act_3_stopping_point",
+          type: "stopping_point",
+          title: "Pause & Reflect: Parts of a Whole",
+          instructions: "Take a breath! Learning fractions takes time and practice.",
+          config: {
+            type: "stopping_point",
+            headline: "Let's Pause & Review Key Ideas",
+            body: "Fractions describe equal shares. When you see a fraction like 1/4:\n• The BOTTOM number (denominator) counts the total equal pieces in the whole.\n• The TOP number (numerator) counts the pieces you are focusing on.",
+            recommendation:
+              "We have recorded your effort. Let's move ahead together with step-by-step guidance.",
+            keyTakeaways: [
+              "Always count the total equal parts first—that is your denominator.",
+              "Then count the shaded or eaten parts—that is your numerator.",
+            ],
+          },
+        },
+      },
     },
     {
       id: "act_4_guided",

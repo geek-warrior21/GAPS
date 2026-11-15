@@ -87,6 +87,77 @@ export const SCI_CIRCUITS_LESSON: LessonPlan = {
             "Air is an electrical insulator. When the switch is open, the air gap stops charges from completing the loop. Current requires a continuous conducting path from the battery positive terminal, through the bulb, and back to the negative terminal.",
         },
       },
+      remediation: {
+        branchId: "branch_sci_predict_remediation",
+        triggerCondition: "incorrect_prediction",
+        targetedExplanation:
+          "Electric current requires an unbroken, continuous loop. Even if the battery is fully charged, electrons cannot jump across the air gap of an open switch! Let's examine how the air gap stops current.",
+        remediationActivity: {
+          id: "act_3_remediation_sim",
+          type: "interactive_manipulation",
+          title: "Guided Investigation: The Air Gap in an Open Circuit",
+          instructions:
+            "Observe the gap when the switch is open. Notice that current cannot flow across the air gap.",
+          config: {
+            type: "interactive_manipulation",
+            simulation: {
+              simulationKind: "circuit_loop",
+              initialSwitchState: "open",
+              initialWireConnected: true,
+              hasBattery: true,
+              hasBulb: true,
+              conductiveObject: "none",
+              instruction: "Toggle the switch to see the air gap open and close.",
+            },
+          },
+        },
+        followUpCheck: {
+          id: "act_3_remediation_fresh_check",
+          type: "independent_check",
+          title: "Fresh Check: Circuit Continuity",
+          instructions: "Apply what you just learned to this fresh scenario.",
+          config: {
+            type: "independent_check",
+            prompt:
+              "What happens if one wire is disconnected from the battery terminal in a circuit?",
+            questionType: "choice",
+            choices: [
+              {
+                id: "fresh_wire_dark",
+                text: "Current stops flowing and the bulb stays dark",
+              },
+              {
+                id: "fresh_wire_glow",
+                text: "The bulb stays on because one wire is enough",
+              },
+              {
+                id: "fresh_wire_leak",
+                text: "Electricity leaks onto the table",
+              },
+            ],
+            correctAnswer: "fresh_wire_dark",
+            explanation:
+              "Disconnecting a wire breaks the continuous loop. Current cannot flow unless there is a complete path from one battery terminal to the other.",
+          },
+        },
+        stoppingPoint: {
+          id: "act_3_stopping_point",
+          type: "stopping_point",
+          title: "Pause & Reflect: Circuit Loops",
+          instructions: "Let's review the fundamental rule of electric circuits.",
+          config: {
+            type: "stopping_point",
+            headline: "Key Rule: The Closed Loop",
+            body: "Electric charges cannot travel through open air gaps in low-voltage circuits. For any electric device to work, there MUST be an uninterrupted conducting path from the battery, through the device, and back.",
+            recommendation:
+              "You have explored the basics of circuits! Let's continue together with guided challenges.",
+            keyTakeaways: [
+              "Closed circuit = continuous path = current flows.",
+              "Open circuit = air gap = current stops completely.",
+            ],
+          },
+        },
+      },
     },
     {
       id: "act_4_guided",

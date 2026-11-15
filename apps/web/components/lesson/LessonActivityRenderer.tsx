@@ -15,6 +15,7 @@ interface LessonActivityRendererProps {
   activity: LessonActivity;
   isSubmitting: boolean;
   onRespond: (response: unknown) => Promise<void>;
+  isFinalActivity?: boolean;
 }
 
 function extractSimulation(cfg: LessonActivityConfig): SimulationConfig | null {
@@ -28,6 +29,7 @@ export function LessonActivityRenderer({
   activity,
   isSubmitting,
   onRespond,
+  isFinalActivity = false,
 }: LessonActivityRendererProps) {
   const { config } = activity;
   const initialSim = extractSimulation(config);
@@ -522,12 +524,82 @@ export function LessonActivityRenderer({
                 onClick={() => onRespond({ answer: independentAnswer })}
                 className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <span>{isSubmitting ? "Finalizing..." : "Complete Lesson & Collect Sparks"}</span>
-                <span>✨</span>
+                <span>
+                  {isSubmitting
+                    ? "Submitting..."
+                    : isFinalActivity
+                      ? "Complete Lesson & Collect Sparks"
+                      : "Submit & Continue"}
+                </span>
+                <span>{isFinalActivity ? "✨" : "→"}</span>
               </button>
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // --- 6. STOPPING POINT ACTIVITY ---
+  if (config.type === "stopping_point") {
+    return (
+      <div className="space-y-6">
+        <div className="p-8 bg-surface rounded-3xl border border-line shadow-xs space-y-6">
+          <div className="flex items-center gap-3">
+            <span className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-700 flex items-center justify-center text-2xl font-black">
+              🛑
+            </span>
+            <div>
+              <span className="text-2xs font-extrabold text-amber-700 uppercase tracking-wider">
+                Support & Reflection
+              </span>
+              <h2 className="text-xl font-extrabold text-ink">{config.headline}</h2>
+            </div>
+          </div>
+
+          <div className="prose prose-sm text-ink/90 leading-relaxed font-medium bg-surface-2/40 p-6 rounded-2xl border border-line">
+            <p className="whitespace-pre-line text-sm sm:text-base">{config.body}</p>
+          </div>
+
+          {config.keyTakeaways && config.keyTakeaways.length > 0 && (
+            <div className="p-5 bg-teal-500/10 border border-teal-500/20 rounded-2xl space-y-3">
+              <div className="flex items-center gap-2 text-teal-800 font-black text-xs uppercase tracking-wider">
+                <span>💡</span>
+                <span>Key Takeaways</span>
+              </div>
+              <ul className="space-y-2">
+                {config.keyTakeaways.map((takeaway, idx) => (
+                  <li
+                    key={idx}
+                    className="text-xs sm:text-sm font-bold text-teal-950 flex items-start gap-2"
+                  >
+                    <span className="text-teal-600 font-black">•</span>
+                    <span>{takeaway}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="p-5 bg-surface-2/60 border border-line rounded-2xl space-y-1">
+            <div className="text-2xs font-black uppercase tracking-wider text-muted">
+              Recommendation
+            </div>
+            <p className="text-xs sm:text-sm font-bold text-ink">{config.recommendation}</p>
+          </div>
+
+          <div className="pt-4 flex justify-end">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => onRespond({ acknowledged: true })}
+              className="px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <span>{isSubmitting ? "Proceeding..." : "Acknowledge & Continue"}</span>
+              <span>→</span>
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

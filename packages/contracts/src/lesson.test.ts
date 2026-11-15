@@ -234,4 +234,114 @@ describe("Lesson Contracts & Validation", () => {
       expect(parsed.data.topics).toHaveLength(2);
     }
   });
+
+  it("validates lesson activities with authored adaptive remediation branch and stopping point", () => {
+    const adaptiveActivity: LessonPlan = {
+      lessonId: "lesson-adaptive-test",
+      version: "1.0",
+      subject: "maths",
+      level: 6,
+      topicId: "maths-adaptive",
+      title: "Adaptive Lesson",
+      description: "Testing adaptive remediation",
+      learningObjectives: ["Test adaptive flow"],
+      activities: [
+        {
+          id: "act_intro",
+          type: "intro",
+          title: "Intro",
+          instructions: "Intro",
+          config: {
+            type: "intro",
+            headline: "Intro",
+            body: "Intro text",
+          },
+        },
+        {
+          id: "act_predict_adaptive",
+          type: "predict_and_observe",
+          title: "Predict with Remediation",
+          instructions: "Predict",
+          config: {
+            type: "predict_and_observe",
+            prompt: "What is 3 parts of 4?",
+            predictionChoices: [
+              { id: "c1", text: "3/4", isExpected: true },
+              { id: "c2", text: "4/3" },
+            ],
+            simulation: {
+              simulationKind: "fraction_strip",
+              initialParts: 4,
+              initialShaded: 1,
+              allowChangeParts: false,
+              allowChangeShaded: true,
+              minParts: 4,
+              maxParts: 4,
+              instruction: "Observe",
+            },
+            observationReveal: {
+              expectedObservation: "3/4",
+              explanation: "3 parts of 4 is 3/4",
+            },
+          },
+          remediation: {
+            branchId: "branch_remediation_test",
+            targetedExplanation: "Denominator means total equal pieces.",
+            remediationActivity: {
+              id: "act_remediation_sim",
+              type: "interactive_manipulation",
+              title: "Remediation Simulation",
+              instructions: "Adjust",
+              config: {
+                type: "interactive_manipulation",
+                simulation: {
+                  simulationKind: "fraction_strip",
+                  initialParts: 4,
+                  initialShaded: 2,
+                  allowChangeParts: false,
+                  allowChangeShaded: true,
+                  minParts: 4,
+                  maxParts: 4,
+                  instruction: "Notice 4",
+                },
+              },
+            },
+            followUpCheck: {
+              id: "act_remediation_fresh_check",
+              type: "independent_check",
+              title: "Fresh Question",
+              instructions: "Check again",
+              config: {
+                type: "independent_check",
+                prompt: "What is 1 of 4 equal parts?",
+                questionType: "choice",
+                choices: [
+                  { id: "f1", text: "1/4" },
+                  { id: "f2", text: "4/1" },
+                ],
+                correctAnswer: "f1",
+                explanation: "1 of 4 is 1/4",
+              },
+            },
+            stoppingPoint: {
+              id: "act_remediation_stop",
+              type: "stopping_point",
+              title: "Stopping Point",
+              instructions: "Pause and review",
+              config: {
+                type: "stopping_point",
+                headline: "Let's Pause & Review",
+                body: "Fractions take time.",
+                recommendation: "Take a break and try again later.",
+                keyTakeaways: ["Part over whole"],
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    const parsed = LessonPlanSchema.safeParse(adaptiveActivity);
+    expect(parsed.success).toBe(true);
+  });
 });

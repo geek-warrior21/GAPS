@@ -29,6 +29,7 @@ export const LessonActivityTypeSchema = z.enum([
   "predict_and_observe",
   "guided_practice",
   "independent_check",
+  "stopping_point",
 ]);
 export type LessonActivityType = z.infer<typeof LessonActivityTypeSchema>;
 
@@ -119,23 +120,67 @@ export const IndependentCheckConfigSchema = z.object({
 });
 export type IndependentCheckConfig = z.infer<typeof IndependentCheckConfigSchema>;
 
+export const StoppingPointConfigSchema = z.object({
+  type: z.literal("stopping_point"),
+  headline: z.string(),
+  body: z.string(),
+  recommendation: z.string(),
+  keyTakeaways: z.array(z.string()).optional(),
+});
+export type StoppingPointConfig = z.infer<typeof StoppingPointConfigSchema>;
+
 export const LessonActivityConfigSchema = z.discriminatedUnion("type", [
   IntroConfigSchema,
   InteractiveManipulationConfigSchema,
   PredictAndObserveConfigSchema,
   GuidedPracticeConfigSchema,
   IndependentCheckConfigSchema,
+  StoppingPointConfigSchema,
 ]);
 export type LessonActivityConfig = z.infer<typeof LessonActivityConfigSchema>;
 
-export const LessonActivitySchema = z.object({
-  id: z.string(),
-  type: LessonActivityTypeSchema,
-  title: z.string(),
-  instructions: z.string(),
-  config: LessonActivityConfigSchema,
-});
-export type LessonActivity = z.infer<typeof LessonActivitySchema>;
+export interface LessonActivity {
+  id: string;
+  type: LessonActivityType;
+  title: string;
+  instructions: string;
+  config: LessonActivityConfig;
+  remediation?: RemediationBranch;
+}
+
+export interface RemediationBranch {
+  branchId: string;
+  triggerCondition?: "incorrect_prediction" | "incorrect_check" | "any_incorrect";
+  targetedExplanation: string;
+  remediationActivity: LessonActivity;
+  followUpCheck: LessonActivity;
+  stoppingPoint?: LessonActivity;
+}
+
+export const RemediationBranchSchema: z.ZodType<RemediationBranch> = z.lazy(() =>
+  z.object({
+    branchId: z.string(),
+    triggerCondition: z
+      .enum(["incorrect_prediction", "incorrect_check", "any_incorrect"])
+      .default("any_incorrect")
+      .optional(),
+    targetedExplanation: z.string(),
+    remediationActivity: LessonActivitySchema,
+    followUpCheck: LessonActivitySchema,
+    stoppingPoint: LessonActivitySchema.optional(),
+  }),
+);
+
+export const LessonActivitySchema: z.ZodType<LessonActivity> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    type: LessonActivityTypeSchema,
+    title: z.string(),
+    instructions: z.string(),
+    config: LessonActivityConfigSchema,
+    remediation: RemediationBranchSchema.optional(),
+  }),
+);
 
 export const LessonPlanSchema = z.object({
   lessonId: z.string(),
@@ -150,6 +195,21 @@ export const LessonPlanSchema = z.object({
 });
 export type LessonPlan = z.infer<typeof LessonPlanSchema>;
 
+export const ActiveBranchStageSchema = z.enum([
+  "remediation_activity",
+  "followup_check",
+  "stopping_point",
+]);
+export type ActiveBranchStage = z.infer<typeof ActiveBranchStageSchema>;
+
+export const ActiveBranchStateSchema = z.object({
+  parentActivityId: z.string(),
+  stage: ActiveBranchStageSchema,
+  attemptsCount: z.number().int().nonnegative(),
+  initialResponse: z.unknown().optional(),
+});
+export type ActiveBranchState = z.infer<typeof ActiveBranchStateSchema>;
+
 export const LessonSessionResponseSchema = z.object({
   session: z.object({
     id: z.string(),
@@ -160,6 +220,9 @@ export const LessonSessionResponseSchema = z.object({
   }),
   lesson: LessonPlanSchema,
   currentActivityIndex: z.number().int().nonnegative(),
+  activeActivity: LessonActivitySchema.optional(),
+  activeBranch: ActiveBranchStateSchema.nullable().optional(),
+  assistanceStatus: z.record(z.string(), z.string()).optional(),
   completedActivities: z.array(z.string()),
   activityResponses: z.record(z.string(), z.unknown()),
   isCompleted: z.boolean(),
@@ -179,6 +242,8 @@ export const LessonRespondResponseSchema = z.object({
   feedback: z.string().optional(),
   isCorrect: z.boolean().optional(),
   nextActivityIndex: z.number().int().nonnegative(),
+  activeBranch: ActiveBranchStateSchema.nullable().optional(),
+  activeActivity: LessonActivitySchema.optional(),
   isCompleted: z.boolean(),
   sparksAwarded: z.number(),
 });
