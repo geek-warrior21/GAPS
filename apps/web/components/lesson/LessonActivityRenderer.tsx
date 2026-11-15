@@ -11,11 +11,19 @@ import type {
 import { FractionStripWidget } from "./FractionStripWidget";
 import { CircuitSimulatorWidget } from "./CircuitSimulatorWidget";
 
+export interface ServerCheckResult {
+  isCorrect: boolean;
+  feedback: string;
+}
+
 interface LessonActivityRendererProps {
   activity: LessonActivity;
   isSubmitting: boolean;
   onRespond: (response: unknown) => Promise<void>;
   isFinalActivity?: boolean;
+  /** Result of a server-graded check, shown until the learner continues. */
+  serverResult?: ServerCheckResult | null;
+  onContinue?: () => void;
 }
 
 function extractSimulation(cfg: LessonActivityConfig): SimulationConfig | null {
@@ -30,6 +38,8 @@ export function LessonActivityRenderer({
   isSubmitting,
   onRespond,
   isFinalActivity = false,
+  serverResult = null,
+  onContinue,
 }: LessonActivityRendererProps) {
   const { config } = activity;
   const initialSim = extractSimulation(config);
@@ -136,7 +146,9 @@ export function LessonActivityRenderer({
               onClick={() => onRespond({ acknowledged: true })}
               className="px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <span>{isSubmitting ? "Starting..." : "Let's Explore"}</span>
+              <span>
+                {isSubmitting ? "Saving..." : isFinalActivity ? "Finish Lesson" : "Let's Explore"}
+              </span>
               <span>→</span>
             </button>
           </div>
@@ -411,7 +423,21 @@ export function LessonActivityRenderer({
 
   // --- 5. INDEPENDENT CHECK ACTIVITY ---
   if (config.type === "independent_check") {
+    // Server-graded checks never receive the answer: the response is sent first
+    // and the result comes back from the server.
+    const isServerGraded = config.serverGraded === true;
+    const shownResult = isServerGraded
+      ? serverResult
+        ? { isCorrect: serverResult.isCorrect, explanation: serverResult.feedback }
+        : null
+      : checkResult;
+    const isAnswered = isServerGraded ? serverResult !== null : checkSubmitted;
+
     const handleCheckSubmit = () => {
+      if (isServerGraded) {
+        void onRespond({ answer: independentAnswer });
+        return;
+      }
       const isCorrect =
         independentAnswer.trim().toLowerCase() === config.correctAnswer.trim().toLowerCase();
       setCheckResult({
@@ -451,13 +477,13 @@ export function LessonActivityRenderer({
                   <button
                     key={choice.id}
                     type="button"
-                    disabled={checkSubmitted}
+                    disabled={isAnswered || isSubmitting}
                     onClick={() => setIndependentAnswer(choice.id)}
                     className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
                         ? "bg-primary/10 border-primary text-primary font-bold shadow-xs"
                         : "bg-surface border-line text-ink hover:bg-surface-2"
-                    } ${checkSubmitted ? "opacity-75 cursor-default" : ""}`}
+                    } ${isAnswered ? "opacity-75 cursor-default" : ""}`}
                   >
                     <span className="text-sm">{choice.text}</span>
                     <span className="text-xs font-bold text-muted">
@@ -476,7 +502,7 @@ export function LessonActivityRenderer({
               </label>
               <input
                 type="text"
-                disabled={checkSubmitted}
+                disabled={isAnswered || isSubmitting}
                 value={independentAnswer}
                 onChange={(e) => setIndependentAnswer(e.target.value)}
                 placeholder="e.g. 3/4"
@@ -485,43 +511,47 @@ export function LessonActivityRenderer({
             </div>
           )}
 
-          {!checkSubmitted && (
+          {!isAnswered && (
             <div className="flex justify-end pt-2">
               <button
                 type="button"
-                disabled={!independentAnswer.trim()}
+                disabled={!independentAnswer.trim() || isSubmitting}
                 onClick={handleCheckSubmit}
                 className="px-6 py-2.5 bg-primary hover:bg-primary-ink text-white rounded-xl text-sm font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-40"
               >
-                Submit Answer
+                {isSubmitting ? "Checking..." : "Submit Answer"}
               </button>
             </div>
           )}
         </div>
 
-        {checkSubmitted && checkResult && (
+        {isAnswered && shownResult && (
           <div className="space-y-6 animate-fade-in">
             <div
               className={`p-6 rounded-3xl border space-y-3 ${
-                checkResult.isCorrect
+                shownResult.isCorrect
                   ? "bg-teal-500/10 border-teal-500/20 text-teal-950"
                   : "bg-amber-500/10 border-amber-500/20 text-amber-950"
               }`}
             >
               <div className="flex items-center gap-2 font-black text-xs uppercase tracking-wider">
-                <span>{checkResult.isCorrect ? "✅" : "💡"}</span>
+                <span>{shownResult.isCorrect ? "✅" : "💡"}</span>
                 <span>
-                  {checkResult.isCorrect ? "Correct Response!" : "Good Try — Learning Opportunity"}
+                  {shownResult.isCorrect ? "Correct Response!" : "Good Try — Learning Opportunity"}
                 </span>
               </div>
-              <p className="text-sm font-medium leading-relaxed">{checkResult.explanation}</p>
+              <p className="text-sm font-medium leading-relaxed">{shownResult.explanation}</p>
             </div>
 
             <div className="flex justify-end">
               <button
                 type="button"
                 disabled={isSubmitting}
-                onClick={() => onRespond({ answer: independentAnswer })}
+                data-testid="check-continue-button"
+                onClick={() => {
+                  if (isServerGraded) onContinue?.();
+                  else void onRespond({ answer: independentAnswer });
+                }}
                 className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <span>
@@ -529,7 +559,9 @@ export function LessonActivityRenderer({
                     ? "Submitting..."
                     : isFinalActivity
                       ? "Complete Lesson & Collect Sparks"
-                      : "Submit & Continue"}
+                      : isServerGraded
+                        ? "Continue"
+                        : "Submit & Continue"}
                 </span>
                 <span>{isFinalActivity ? "✨" : "→"}</span>
               </button>
@@ -589,23 +621,38 @@ export function LessonActivityRenderer({
           </div>
 
           <div className="pt-4 flex flex-col sm:flex-row items-center justify-end gap-3">
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => onRespond({ acknowledged: true, saveAndExit: true })}
-              className="w-full sm:w-auto px-6 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-sm font-bold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
-            >
-              Save & Finish for Now
-            </button>
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => onRespond({ acknowledged: true })}
-              className="w-full sm:w-auto px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              <span>{isSubmitting ? "Proceeding..." : "Acknowledge & Continue"}</span>
-              <span>→</span>
-            </button>
+            {isFinalActivity && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                data-testid="finish-for-today-button"
+                onClick={() => onRespond({ acknowledged: true })}
+                className="w-full sm:w-auto px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSubmitting ? "Saving..." : "Finish for Today"}
+              </button>
+            )}
+            {!isFinalActivity && (
+              <>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => onRespond({ acknowledged: true, saveAndExit: true })}
+                  className="w-full sm:w-auto px-6 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-sm font-bold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Save & Finish for Now
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => onRespond({ acknowledged: true })}
+                  className="w-full sm:w-auto px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <span>{isSubmitting ? "Proceeding..." : "Acknowledge & Continue"}</span>
+                  <span>→</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

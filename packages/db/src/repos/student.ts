@@ -13,6 +13,7 @@ import {
   sparksLedger,
   studentState,
   users,
+  decisionTraces,
 } from "../schema";
 
 export interface StudentRepo {
@@ -61,6 +62,10 @@ export interface StudentRepo {
     questId: string,
     updates: Partial<typeof quests.$inferInsert>,
   ): Promise<typeof quests.$inferSelect | null>;
+  recordDecisionTrace(
+    data: Omit<typeof decisionTraces.$inferInsert, "studentId">,
+  ): Promise<typeof decisionTraces.$inferSelect>;
+  listDecisionTraces(sessionId: string): Promise<(typeof decisionTraces.$inferSelect)[]>;
   getSparksTotal(): Promise<number>;
   awardSparks(
     sourceId: string,
@@ -392,6 +397,27 @@ export function createStudentRepo(studentId: string, db: DbClient): StudentRepo 
     async getSparksTotal() {
       const state = await this.getStudentState();
       return state?.sparksTotal ?? 0;
+    },
+
+    async recordDecisionTrace(data) {
+      const [inserted] = await db
+        .insert(decisionTraces)
+        .values({ ...data, studentId })
+        .returning();
+      if (!inserted) {
+        throw new Error(`Failed to record decision trace for ${studentId}`);
+      }
+      return inserted;
+    },
+
+    async listDecisionTraces(sessionId: string) {
+      return db
+        .select()
+        .from(decisionTraces)
+        .where(
+          and(eq(decisionTraces.studentId, studentId), eq(decisionTraces.sessionId, sessionId)),
+        )
+        .orderBy(asc(decisionTraces.createdAt), asc(decisionTraces.id));
     },
 
     async awardSparks(sourceId: string, kind: string, amount: number) {

@@ -1033,3 +1033,130 @@ Implement an evidence-driven adaptive loop through the shared lesson engine for 
 - **Authoritative Server Envelope:** The LLM is restricted to selecting and configuring activities within the server's pre-computed `eligibleActions`. It cannot declare mastery or modify learner beliefs.
 - **Fallback Policy:** With `LLM_PROVIDER=disabled` (the project default), the system runs completely deterministically using `AuthoredTeachingDecisionEngine`, providing full curriculum coverage for fractions and circuits without external dependencies.
 - **Explanatory Prose Tagging:** Model-generated explanations are explicitly marked with `unverifiedExplanatoryProse: true` so the client UI and audit logs differentiate between deterministically verified simulation rules and unvetted generative prose.
+
+---
+
+## 2026-11-16 — Teaching Engine Drives Persisted Sessions; Advancement Reconciled with the Belief Reducer (Clau)
+
+Starting point: `e62b296561550d62a9f70f2ebdc8525b47040aae` (Gem's handoff commit), branch
+`codex/clau-teaching-engine`. Baseline `pnpm verify` on a fresh device passed before any change:
+308 unit/integration tests (42 files), 38 browser tests, 42 templates in `content:check`.
+
+### 1. Findings on the two acceptance questions
+
+- **A. The engine did not drive real sessions.** `apps/web/server/teaching/*` was imported only by the
+  two `/api/v1/dev/teaching-engine/*` routes and the comparison. `lesson/service.ts` walked a fixed
+  authored plan; the saved `activeActivity` came from that plan, not from a decision.
+- **B. Advancement bypassed the belief reducer.** `TeachingPolicyEngine` made `advance` eligible after
+  two consecutive unassisted correct answers on two activity ids, and the authored `advance` activity
+  told the learner "Mastery Demonstrated". The canonical rule (SPEC §9 / §19.4) needs 3 of the last 4
+  independent attempts correct, the latest 2 correct, on 3 distinct items across 2 templates. The
+  authored engine also issued the same question under new ids (`itm_maths_check_<step>`), so "distinct
+  items" were not distinct. The two never met only because the engine was not wired to real sessions.
+
+### 2. Built
+
+1. **Reconciled policy (`teaching/policy.ts`, `TEACHING_POLICY_VERSION = "teaching-rules-1.1"`).**
+   - The two-answer rule is kept as a within-lesson signal (`lessonStage:
+"ready_for_demonstration_check"`): guided practice stops being eligible and a further independent
+     check follows. It never advances the objective.
+   - `advance` is eligible only when `objectiveStatus` (new input, the belief reducer's stored
+     status) is `demonstrated` or `retained`. With no status supplied, `advance` is never eligible.
+     The policy does not restate or change the reducer's thresholds; `packages/domain` is untouched.
+   - Teaching steps are now sequenced from delivered activities (first check after the opening
+     exploration; guided task after a targeted exploration; supported check after support; a
+     walkthrough when the learner continues after a pause), so real sessions cannot loop on one action.
+   - Diagnostic probes are asked at most once per lesson, never count toward a streak, and a missed
+     probe is treated as a conceptual gap. Remediation stays bounded at 2 cycles, then `pause`.
+   - When no unused authored check remains and the objective is not demonstrated, the lesson closes
+     without advancing (`lessonStage: "consolidating"`).
+2. **Authored item bank (`teaching/item-bank.ts`, `adaptive-items-1.0`).** 8 distinct assessed
+   questions across 2 templates plus 1 diagnostic probe for each of `MATH-FRAC-PART` and
+   `SCI-ELEC-CIRCUITS`. Distractors carry teaching-level misconception tags; untagged distractors are
+   ambiguous and trigger the probe. Only `PART_RATIO` maps to a canonical id (`MC-PART-RATIO`) and is
+   written to `attempts.misconception_id`.
+3. **Sequencer (`teaching/sequencer.ts`).** Pure step logic shared by real sessions and the developer
+   comparison: builds the decision input, calls the engine, enforces the server envelope, fixes the
+   assistance level at delivery, grades responses. Any engine exception, out-of-envelope action,
+   schema/type/factual failure falls back to the authored decision for the same objective. Assessed
+   questions, `advance` and `pause` always use authored content, whichever engine chose the action.
+4. **Persisted engine-driven sessions (`teaching/adaptive-session.ts`, `teaching/adaptive-lessons.ts`).**
+   Lessons `lesson-maths-frac-part-adaptive` and `lesson-sci-circuits-adaptive` run through the existing
+   lesson endpoints, `learning_sessions` (mode `lesson`) and player. Each decided step is stored with
+   its full activity snapshot, assistance level, policy/engine/item-bank versions and decision evidence
+   before it is returned; start and respond write the session, attempt, belief, events and a
+   `decision_traces` row in one transaction. Refresh returns the stored step. A resubmitted step returns
+   the stored result; the attempt key is one per step (`att_<session>_s<seq>`); concurrent submissions
+   are resolved by the unique attempt key plus a guarded step-count update. Beliefs change only through
+   `recordLessonAssessment` and the belief reducer. Diagnostic probes and teaching steps are events only.
+5. **Server-graded checks (Non-negotiable 8).** Lesson responses previously contained every check's
+   `correctAnswer`, and the player graded locally. Student-facing activities are now redacted
+   (`lesson/redact.ts`, `serverGraded: true`) for adaptive AND fixed authored lessons; the player
+   submits first and shows the server's verdict. The developer preview keeps local grading.
+6. **Developer trace.** `decision_traces` (previously unused) now holds one row per real-session
+   decision via new principal-scoped repo methods `recordDecisionTrace` / `listDecisionTraces`. The
+   `/dev/lesson-planner` comparison replays the same sequencer with the real belief reducer and shows
+   belief status, lesson stage, assistance level and the synthetic answer for every step.
+7. **Entry points.** "Step-by-Step Lesson" buttons on Learn for fractions and circuits. The next-action
+   banner returns a learner to their adaptive session when that is where they paused.
+
+### 3. Verification Results (this device, local PostgreSQL 16.16, `LLM_PROVIDER=disabled`)
+
+- **`pnpm verify`:** passed end to end on the final code.
+- **`pnpm typecheck` / `pnpm lint` / `pnpm format:check`:** clean.
+- **`pnpm content:check`:** 42 templates verified across 500 seeds each.
+- **`pnpm db:migrate && pnpm db:seed`:** applied cleanly. No new migration.
+- **`pnpm test`:** 43 files, 330 tests passed (was 42 / 308).
+  - `apps/web/server/adaptive-lesson.test.ts` (new, 16 tests): succeeding and struggling journeys in
+    both subjects against PostgreSQL, refresh/retry/concurrency, assistance provenance, invalid
+    answers, student scoping, returning learners, engine failure / disabled provider / rogue engine,
+    corrupt state, fixed-lesson redaction, participation-is-not-evidence.
+  - `apps/web/server/teaching.test.ts`: 22 tests (was 16).
+- **`pnpm test:e2e`:** 23 scenarios, 46 tests passed on Desktop Chrome and Mobile Chrome (was 19 / 38).
+  New S20–S23 drive the adaptive lessons in the browser for both learners in both subjects.
+
+### 4. Tests changed, and why
+
+- `teaching.test.ts` "authorizes advance when student demonstrates sufficient independent evidence"
+  asserted `advance` after two correct answers. That is the behaviour acceptance question B asked to
+  reconcile. It is replaced by tests asserting that two answers do NOT advance, that advance requires
+  the reducer's status, and that a missing status never advances.
+- The two comparison tests and browser scenario S19 asserted step positions of the old hand-scripted
+  trace (advance at step 3). They now assert the full real sequence (advance at step 5 for the
+  succeeding learner, after three distinct unassisted checks; nine steps ending in pause for the
+  struggling learner).
+- Four `Submit & Continue` clicks in S14–S17 became `check-continue-button`, because fixed lessons are
+  now graded on the server before the learner continues. No assertion was removed.
+
+### 5. Assumptions
+
+- Engine-driven lessons were added as two new lesson ids beside Gem's fixed lessons instead of
+  replacing them, because replacing them would rewrite the journeys Gem's S11–S17 verify. Which lesson
+  Learn should default to is Gyan's decision.
+- A check taken after support that followed the last assessed question is assisted (level 1), matching
+  Gem's fixed-lesson rule. Teaching that opens a lesson before any question is not assistance.
+- Diagnostic probes are not belief evidence (a 2-choice probe is too weak to count toward mastery).
+- After a "not yet" answer the feedback names the idea to revisit and does not reveal the answer.
+- `decision_traces.provider` stores the decision source (`authored`, `fallback`, `llm_suggested`).
+- Real sessions use the authored engine only. The model engine is reachable in sessions only through
+  the test-only `engine` option.
+
+### 6. Limitations and follow-ups
+
+- **No live-model verification.** Every result above is authored behaviour with the provider disabled.
+  The fallback and envelope guards were tested with a failing engine, the disabled model engine and a
+  hand-written rogue engine, not with a real provider.
+- **Model engine not enabled for real sessions.** Non-negotiable 6 needs the student's `ai_free_text`
+  scope and the class flag checked per request; no such gate exists in the tutor or lesson code today.
+- **`/dev/lesson-planner` and `/api/v1/dev/*` have no authentication or environment gate** (existing).
+  The step/compare/generate routes return authored activities including answers. Needs a decision
+  before any pilot deployment.
+- Only `MATH-FRAC-PART` and `SCI-ELEC-CIRCUITS` have item banks. The comparison now rejects other
+  objectives (400 `UNSUPPORTED_OBJECTIVE`) instead of improvising checks.
+- Item bank content has no `review.status`; Non-negotiable 10 (reviewed content in production) is not
+  enforced for lessons, fixed or adaptive.
+- `revisit_prerequisite` is never chosen: neither objective has a prerequisite in the bank.
+- `predict_and_observe` activities still send `isExpected` (a prediction is participation, not an
+  assessed item). Lesson UI strings remain hard-coded in components rather than `messages/en.json`.
+- If the page is reloaded between "Submit Answer" and "Continue", the verdict text is not shown again;
+  the stored result and next step are unaffected.

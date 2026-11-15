@@ -7,9 +7,40 @@ import type {
   LessonSessionResponse,
   SyntheticLearnerProfile,
   TeachingEngineTraceResponse,
+  TeachingDecisionTraceEntry,
   LessonActivity,
 } from "@gaps/contracts";
 import { LessonPlayer } from "@/components/lesson/LessonPlayer";
+
+/** Evidence behind one decision: belief status, lesson stage and the learner's response. */
+function TraceEvidence({ dec }: { dec: TeachingDecisionTraceEntry }) {
+  const response = dec.learnerResponse;
+  return (
+    <div
+      data-testid="trace-evidence"
+      className="text-2xs text-muted leading-relaxed bg-surface p-2.5 rounded-xl border border-line space-y-0.5"
+    >
+      <div>
+        <strong className="text-ink">Objective status (belief reducer):</strong>{" "}
+        {dec.objectiveStatus ?? "n/a"}
+        {dec.lessonStage ? ` · Lesson stage: ${dec.lessonStage}` : ""}
+      </div>
+      {dec.assistanceLevel !== undefined && (
+        <div>
+          <strong className="text-ink">Check recorded as:</strong>{" "}
+          {dec.assistanceLevel === 0 ? "independent" : "assisted (cannot count toward mastery)"}
+        </div>
+      )}
+      {response && response.isCorrect !== undefined && (
+        <div>
+          <strong className="text-ink">Synthetic learner answered:</strong>{" "}
+          {response.submittedAnswer} ({response.isCorrect ? "correct" : "not yet"}
+          {response.countedAsEvidence ? ", stored as evidence" : ", not evidence"})
+        </div>
+      )}
+    </div>
+  );
+}
 
 const SUPPORTED_OBJECTIVES = [
   {
@@ -402,8 +433,8 @@ export default function DevLessonPlannerPage() {
                     <p className="text-xs text-muted mt-0.5">
                       Triggers: Misconception (
                       {comparisonResult.traces.struggling.learnerProfile.namedMisconception}) →
-                      Targeted Manipulation → Ambiguous Check → Alternative Explanation → Bounded
-                      Pause.
+                      Targeted Manipulation → Guided Task → Supported Check → Ambiguous Error →
+                      Diagnostic Probe → Alternative Explanation → Bounded Pause.
                     </p>
                   </div>
 
@@ -455,6 +486,8 @@ export default function DevLessonPlannerPage() {
                           ))}
                         </div>
 
+                        <TraceEvidence dec={dec} />
+
                         {dec.inferredMisconception && (
                           <div className="text-2xs font-bold text-amber-900 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200">
                             Misconception Detected: {dec.inferredMisconception}
@@ -499,8 +532,9 @@ export default function DevLessonPlannerPage() {
                       Independent Mastery & Progression
                     </h3>
                     <p className="text-xs text-muted mt-0.5">
-                      Sequence: Initial Exploration → Independent Check 1 (Correct) → Distinct
-                      Independent Check 2 (Correct) → Authorized Advance.
+                      Sequence: Initial Exploration → three distinct unassisted checks (correct) →
+                      belief reducer reports demonstrated → Authorized Advance. Two correct answers
+                      move the lesson on but do not advance the objective.
                     </p>
                   </div>
 
@@ -549,6 +583,8 @@ export default function DevLessonPlannerPage() {
                             </span>
                           ))}
                         </div>
+
+                        <TraceEvidence dec={dec} />
 
                         <div className="text-2xs font-bold text-teal-800 bg-teal-50 px-2 py-1 rounded-lg border border-teal-200">
                           🎯 Target: {dec.assessmentTarget}

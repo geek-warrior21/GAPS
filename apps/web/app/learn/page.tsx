@@ -302,7 +302,15 @@ export default function LearnPage() {
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end">
+              <div className="pt-2 flex flex-wrap items-center justify-end gap-3">
+                <Link
+                  href="/lesson/lesson-maths-frac-part-adaptive"
+                  data-testid="start-maths-adaptive-lesson-button"
+                  className="px-5 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-xs sm:text-sm font-bold shadow-2xs transition-colors flex items-center gap-2"
+                >
+                  <span>Step-by-Step Lesson</span>
+                  <span>🧭</span>
+                </Link>
                 <Link
                   href="/lesson/lesson-maths-frac-part-1"
                   data-testid="start-maths-lesson-button"
@@ -440,6 +448,14 @@ export default function LearnPage() {
               </div>
 
               <div className="pt-2 flex flex-wrap items-center justify-end gap-3">
+                <Link
+                  href="/lesson/lesson-sci-circuits-adaptive"
+                  data-testid="start-circuits-adaptive-lesson-button"
+                  className="px-5 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-xs sm:text-sm font-bold shadow-2xs transition-colors flex items-center gap-2"
+                >
+                  <span>Step-by-Step Lesson</span>
+                  <span>🧭</span>
+                </Link>
                 <Link
                   href="/lesson/lesson-sci-circuits-mastery"
                   data-testid="start-circuits-mastery-button"

@@ -1,9 +1,28 @@
 import type {
+  LessonProgressStage,
   LessonTeachingAction as TeachingAction,
   TeachingDecisionInput,
   TeachingDecisionEvidence,
   TeachingAssessedResponse,
 } from "@gaps/contracts";
+
+/**
+ * Version of the lesson-level teaching rules below. It is recorded with every
+ * persisted decision. The belief thresholds themselves stay in packages/domain
+ * (POLICY_VERSION rules-1.0) and are not restated or altered here.
+ */
+export const TEACHING_POLICY_VERSION = "teaching-rules-1.1";
+
+/** Remediation routes allowed in one round before the server requires a pause. */
+export const MAX_REMEDIATION_CYCLES = 2;
+
+/**
+ * Two distinct unassisted correct answers in a row. This is a WITHIN-LESSON
+ * signal only: the learner stops receiving guided practice and moves to further
+ * independent checks. It never advances the objective. Objective advancement
+ * requires the belief reducer's demonstrated status (SPEC §9 / §19.4).
+ */
+export const LESSON_READY_STREAK = 2;
 
 export interface EvaluatedError {
   isAmbiguous: boolean;
@@ -106,239 +125,321 @@ export interface PolicyEvaluationResult {
   assessmentTarget: string;
 }
 
+const SUPPORT_ACTIONS: readonly TeachingAction[] = [
+  "explain",
+  "demonstrate",
+  "explore",
+  "guided_practice",
+  "revisit_prerequisite",
+];
+
+export function isSupportAction(action: TeachingAction): boolean {
+  return SUPPORT_ACTIONS.includes(action);
+}
+
 /**
  * Pure server-side policy engine that determines which teaching actions and
  * objectives are eligible.
  * Requirement 2: "The server decides which objectives and actions are eligible.
  * The LLM can select and configure an activity within those limits.
  * It cannot declare mastery, invent prerequisites, change grading rules, or execute generated code."
+ *
+ * Two thresholds are kept apart on purpose:
+ *  - LESSON_READY_STREAK moves a learner on WITHIN a lesson.
+ *  - `advance` (leaving the objective) is eligible only when `objectiveStatus`,
+ *    computed by the canonical belief reducer over stored evidence, is
+ *    demonstrated or retained. The policy never computes mastery itself.
  */
 export class TeachingPolicyEngine {
   public static evaluatePolicy(input: TeachingDecisionInput): PolicyEvaluationResult {
-    const deliveredCount = input.previouslyDeliveredActivities.length;
+    const delivered = input.previouslyDeliveredActivities;
+    const deliveredCount = delivered.length;
+    const lastDelivered = delivered[deliveredCount - 1];
     const recent = input.recentAssessedResponses;
     const latestResponse: TeachingAssessedResponse | undefined = recent[recent.length - 1];
+    const latestIsDiagnostic = latestResponse?.kind === "diagnostic";
+    const assessed = recent.filter((r) => r.kind !== "diagnostic");
+    const diagnosticAlreadyUsed = recent.some((r) => r.kind === "diagnostic");
 
-    // Compute independent consecutive successes
-    let consecutiveSuccesses = 0;
-    for (let i = recent.length - 1; i >= 0; i--) {
-      const r = recent[i]!;
+    // Independent consecutive successes over assessed responses (probes excluded).
+    const streak: TeachingAssessedResponse[] = [];
+    for (let i = assessed.length - 1; i >= 0; i--) {
+      const r = assessed[i]!;
       if (r.isCorrect && r.assistanceLevel === 0) {
-        consecutiveSuccesses++;
+        streak.push(r);
       } else {
         break;
       }
     }
+    const consecutiveSuccesses = streak.length;
+    const distinctStreakActivities = new Set(streak.map((r) => r.activityId)).size;
 
-    // Distinct items and templates among correct independent checks
-    const correctIndependent = recent.filter((r) => r.isCorrect && r.assistanceLevel === 0);
-    const distinctActivities = new Set(correctIndependent.map((r) => r.activityId));
-
-    // Remediation cycle count
     const remediationCycle = input.remediationCycleCount;
+    const objectiveStatus = input.objectiveStatus;
+    const objectiveDemonstrated =
+      objectiveStatus === "demonstrated" || objectiveStatus === "retained";
+    const noCheckItemsLeft = input.remainingCheckItems === 0;
 
-    // Check for misconception or ambiguity if latest response was incorrect
+    // A response still needs acting on when nothing has been delivered after the
+    // activity it answered. Responses to activities outside the delivered list
+    // (direct policy calls) are treated as needing action.
+    const answeredIndex = latestResponse
+      ? delivered.findIndex((d) => d.id === latestResponse.activityId)
+      : -1;
+    const responsePending =
+      latestResponse !== undefined &&
+      (answeredIndex === -1 || answeredIndex === deliveredCount - 1);
+
     let errorEval: EvaluatedError = {
       isAmbiguous: false,
       misconceptionId: null,
       description: "No recent errors.",
     };
     if (latestResponse && !latestResponse.isCorrect) {
-      errorEval = evaluateErrorMisconception(input.objectiveId, latestResponse.submittedAnswer);
-    }
-
-    const eligibleActions: TeachingAction[] = [];
-    let recommendedAction: TeachingAction = "explore";
-    let rationale = "";
-    let assessmentTarget = "";
-
-    // =========================================================================
-    // RULE 1: Bounded Remediation Loop -> Mandatory Pause
-    // Requirement 4: "Bound remediation loops and provide a genuine save-and-pause option."
-    // =========================================================================
-    if (remediationCycle >= 2 && latestResponse && !latestResponse.isCorrect) {
-      eligibleActions.push("pause");
-      recommendedAction = "pause";
-      rationale =
-        "Student has encountered continued difficulty across 2 remediation cycles. Server policy mandates pause to offer genuine Save & Pause option and prevent frustration.";
-      assessmentTarget =
-        "Reflect on core mental model with educator guidance before re-attempting.";
-
-      return {
-        eligibleActions,
-        recommendedAction,
-        evidence: {
-          rationale,
-          inferredMisconception: errorEval.misconceptionId,
-          isAmbiguous: errorEval.isAmbiguous,
-          consecutiveSuccesses,
-          remediationCycle,
-          eligibleActions,
-        },
-        assessmentTarget,
-      };
-    }
-
-    // =========================================================================
-    // RULE 2: Authoritative Mastery Threshold -> Advance Eligible
-    // Requirement 2: "It cannot declare mastery... server decides which objectives and actions are eligible."
-    // =========================================================================
-    const hasSufficientEvidence = consecutiveSuccesses >= 2 && distinctActivities.size >= 2;
-
-    if (hasSufficientEvidence && latestResponse?.isCorrect) {
-      eligibleActions.push("advance");
-      eligibleActions.push("independent_check"); // Optional challenge check
-      recommendedAction = "advance";
-      rationale = `Student has achieved sufficient independent evidence (${consecutiveSuccesses} consecutive correct across ${distinctActivities.size} items without assistance). Advancement to next objective is authorized.`;
-      assessmentTarget = "Transition understanding to next curriculum milestone.";
-
-      return {
-        eligibleActions,
-        recommendedAction,
-        evidence: {
-          rationale,
-          inferredMisconception: null,
+      if (latestResponse.misconceptionDetected) {
+        errorEval = {
           isAmbiguous: false,
-          consecutiveSuccesses,
-          remediationCycle,
-          eligibleActions,
-        },
-        assessmentTarget,
-      };
+          misconceptionId: latestResponse.misconceptionDetected,
+          description: `Authored distractor maps to misconception ${latestResponse.misconceptionDetected}.`,
+        };
+      } else if (latestResponse.ambiguousError) {
+        errorEval = {
+          isAmbiguous: true,
+          misconceptionId: null,
+          description: `Answer "${latestResponse.submittedAnswer}" does not match a known misconception pattern; diagnostic probe required.`,
+        };
+      } else {
+        errorEval = evaluateErrorMisconception(input.objectiveId, latestResponse.submittedAnswer);
+      }
     }
 
-    // =========================================================================
-    // RULE 3: Initial Session Onboarding (0 activities delivered)
-    // =========================================================================
-    if (deliveredCount === 0) {
-      eligibleActions.push("explore", "demonstrate", "explain");
-      recommendedAction = "explore";
-      rationale =
-        "Initial session step: engage learner with interactive simulation and hands-on discovery.";
-      assessmentTarget = "Introduce physical representation and verify basic tool familiarity.";
-
-      return {
-        eligibleActions,
-        recommendedAction,
-        evidence: {
-          rationale,
-          inferredMisconception: null,
-          isAmbiguous: false,
-          consecutiveSuccesses: 0,
-          remediationCycle: 0,
-          eligibleActions,
-        },
-        assessmentTarget,
-      };
-    }
-
-    // =========================================================================
-    // RULE 4: Latest Response Was Incorrect
-    // =========================================================================
-    if (latestResponse && !latestResponse.isCorrect) {
-      // 4A: Ambiguous Error -> Diagnostic Independent Check
-      // Requirement 3: "Do not infer a definite misconception from every incorrect answer. When evidence is ambiguous, use a diagnostic question."
-      if (errorEval.isAmbiguous) {
-        eligibleActions.push("independent_check");
-        recommendedAction = "independent_check";
-        rationale = `Ambiguous error pattern: ${errorEval.description}. A targeted 2-choice diagnostic probe is required to isolate understanding before prescribing remediation.`;
-        assessmentTarget =
-          "Isolate whether failure is a conceptual misconception or an accidental execution slip.";
-      }
-      // 4B: Continued Confusion (remediationCycle >= 1) -> Alternative Explanation or Simpler Task
-      // Requirement 3: "Continued confusion -> a different explanation or simpler task."
-      else if (remediationCycle >= 1) {
-        eligibleActions.push("explain", "guided_practice");
-        if (input.prerequisites.length > 0) {
-          eligibleActions.push("revisit_prerequisite");
-        }
-        recommendedAction = "explain";
-        rationale = `Persistent misconception (${errorEval.misconceptionId}) after initial support. Server prescribes an alternative explanation route with everyday grounding and a simplified task.`;
-        assessmentTarget =
-          "Reframe core definition with distinct representation to dispel misconception.";
-      }
-      // 4C: Clear Misconception (remediationCycle === 0) -> Interactive Manipulation
-      // Requirement 3: "Numerator/denominator confusion -> fraction manipulation. Open-circuit misconception -> prediction and circuit experiment."
-      else {
-        eligibleActions.push("explore", "guided_practice", "demonstrate");
-        recommendedAction = "explore";
-        rationale = `Identified clear misconception: ${errorEval.misconceptionId}. Prescribing targeted interactive manipulation to contrast incorrect assumption against physical reality.`;
-        assessmentTarget =
-          "Directly observe that simulation behavior contradicts the misconception.";
-      }
-
-      return {
-        eligibleActions,
-        recommendedAction,
-        evidence: {
-          rationale,
-          inferredMisconception: errorEval.misconceptionId,
-          isAmbiguous: errorEval.isAmbiguous,
-          consecutiveSuccesses,
-          remediationCycle,
-          eligibleActions,
-        },
-        assessmentTarget,
-      };
-    }
-
-    // =========================================================================
-    // RULE 5: Latest Response Was Correct
-    // =========================================================================
-    if (latestResponse?.isCorrect) {
-      // 5A: Supported Success -> Later Independent Assessment
-      // Requirement 3: "Supported success -> later independent assessment."
-      if (latestResponse.assistanceLevel > 0) {
-        eligibleActions.push("independent_check");
-        recommendedAction = "independent_check";
-        rationale =
-          "Student succeeded with scaffolded support / remediation. An independent assessment is now required to test unassisted mastery.";
-        assessmentTarget = "Demonstrate unassisted problem solving on a fresh item instance.";
-      }
-      // 5B: Independent Success -> Further Independent Check or Challenge
-      else {
-        eligibleActions.push("independent_check", "guided_practice");
-        recommendedAction = "independent_check";
-        rationale = `Student achieved independent success (${consecutiveSuccesses} consecutive). Presenting next distinct independent check to build towards evidence threshold.`;
-        assessmentTarget = "Verify consistency across distinct question variations.";
-      }
-
-      return {
-        eligibleActions,
-        recommendedAction,
-        evidence: {
-          rationale,
-          inferredMisconception: null,
-          isAmbiguous: false,
-          consecutiveSuccesses,
-          remediationCycle,
-          eligibleActions,
-        },
-        assessmentTarget,
-      };
-    }
-
-    // =========================================================================
-    // RULE 6: Default Next Action (e.g. following exploration or intro)
-    // =========================================================================
-    eligibleActions.push("guided_practice", "independent_check", "explore");
-    recommendedAction = "guided_practice";
-    rationale =
-      "Introductory/exploratory stage completed. Transition to structured guided practice.";
-    assessmentTarget = "Verify ability to achieve guided objective criteria.";
-
-    return {
+    const result = (
+      eligibleActions: TeachingAction[],
+      recommendedAction: TeachingAction,
+      rationale: string,
+      assessmentTarget: string,
+      lessonStage: LessonProgressStage,
+      error: { inferredMisconception: string | null; isAmbiguous: boolean } = {
+        inferredMisconception: null,
+        isAmbiguous: false,
+      },
+    ): PolicyEvaluationResult => ({
       eligibleActions,
       recommendedAction,
       evidence: {
         rationale,
-        inferredMisconception: null,
-        isAmbiguous: false,
+        inferredMisconception: error.inferredMisconception,
+        isAmbiguous: error.isAmbiguous,
         consecutiveSuccesses,
         remediationCycle,
         eligibleActions,
+        ...(objectiveStatus ? { objectiveStatus } : {}),
+        lessonStage,
       },
       assessmentTarget,
-    };
+    });
+
+    /** Wrap up without advancing when no unused authored check remains. */
+    const consolidate = (): PolicyEvaluationResult =>
+      result(
+        ["pause"],
+        "pause",
+        `All authored checks for this objective have been used in this lesson and the objective status is ${objectiveStatus ?? "not supplied"}, not demonstrated. The lesson closes without advancing the objective; further evidence is gathered next time.`,
+        "Consolidate today's work; return for further independent checks.",
+        "consolidating",
+      );
+
+    const independentCheck = (
+      eligible: TeachingAction[],
+      rationale: string,
+      target: string,
+      stage: LessonProgressStage,
+    ): PolicyEvaluationResult =>
+      noCheckItemsLeft
+        ? consolidate()
+        : result(eligible, "independent_check", rationale, target, stage);
+
+    // =========================================================================
+    // A. The latest response has not been acted on yet
+    // =========================================================================
+    if (responsePending && latestResponse) {
+      if (!latestResponse.isCorrect) {
+        // A missed probe settles the ambiguity: it is a conceptual gap, not a slip.
+        const error = latestIsDiagnostic
+          ? { inferredMisconception: null, isAmbiguous: false }
+          : {
+              inferredMisconception: errorEval.misconceptionId,
+              isAmbiguous: errorEval.isAmbiguous,
+            };
+
+        // RULE 1: Bounded Remediation Loop -> Mandatory Pause
+        // Requirement 4: "Bound remediation loops and provide a genuine save-and-pause option."
+        if (remediationCycle >= MAX_REMEDIATION_CYCLES) {
+          return result(
+            ["pause"],
+            "pause",
+            `Student has encountered continued difficulty across ${MAX_REMEDIATION_CYCLES} remediation cycles. Server policy mandates pause to offer genuine Save & Pause option and prevent frustration.`,
+            "Reflect on core mental model with educator guidance before re-attempting.",
+            "paused",
+            error,
+          );
+        }
+
+        // RULE 4A: Ambiguous Error -> Diagnostic probe (once per lesson)
+        // Requirement 3: "Do not infer a definite misconception from every incorrect
+        // answer. When evidence is ambiguous, use a diagnostic question."
+        if (errorEval.isAmbiguous && !latestIsDiagnostic && !diagnosticAlreadyUsed) {
+          return result(
+            ["independent_check"],
+            "independent_check",
+            `Ambiguous error pattern: ${errorEval.description}. A targeted 2-choice diagnostic probe is required to isolate understanding before prescribing remediation.`,
+            "Isolate whether failure is a conceptual misconception or an accidental execution slip.",
+            "remediating",
+            error,
+          );
+        }
+
+        const cause = latestIsDiagnostic
+          ? "The diagnostic probe was not answered correctly, which points to a conceptual gap rather than a slip"
+          : errorEval.misconceptionId
+            ? `Identified clear misconception: ${errorEval.misconceptionId}`
+            : "The error stayed unclassified after a diagnostic probe was already used in this lesson";
+
+        // RULE 4B: Continued Confusion -> Alternative Explanation or Simpler Task
+        // Requirement 3: "Continued confusion -> a different explanation or simpler task."
+        if (remediationCycle >= 1) {
+          const eligible: TeachingAction[] = ["explain", "guided_practice"];
+          if (input.prerequisites.length > 0) eligible.push("revisit_prerequisite");
+          return result(
+            eligible,
+            "explain",
+            `Persistent misconception (${errorEval.misconceptionId ?? "unclassified"}) after initial support. ${cause}. Server prescribes an alternative explanation route with everyday grounding and a simplified task.`,
+            "Reframe core definition with distinct representation to dispel misconception.",
+            "remediating",
+            error,
+          );
+        }
+
+        // RULE 4C: First difficulty -> Interactive Manipulation
+        // Requirement 3: "Numerator/denominator confusion -> fraction manipulation.
+        // Open-circuit misconception -> prediction and circuit experiment."
+        return result(
+          ["explore", "guided_practice", "demonstrate"],
+          "explore",
+          `${cause}. Prescribing targeted interactive manipulation to contrast incorrect assumption against physical reality.`,
+          "Directly observe that simulation behavior contradicts the misconception.",
+          "remediating",
+          error,
+        );
+      }
+
+      // ---- Latest response was correct ------------------------------------
+      if (latestIsDiagnostic) {
+        return independentCheck(
+          ["independent_check"],
+          "The diagnostic probe was answered correctly, so the earlier error looks like a slip rather than a misconception. No remediation is prescribed; a fresh unassisted check follows. The probe itself is not mastery evidence.",
+          "Confirm understanding on a fresh item without support.",
+          "building_evidence",
+        );
+      }
+
+      // RULE 2: Objective advancement is decided by the belief reducer only.
+      if (objectiveDemonstrated) {
+        return result(
+          ["advance", "independent_check"],
+          "advance",
+          `The belief reducer reports this objective as ${objectiveStatus} from stored independent evidence (${consecutiveSuccesses} consecutive unassisted correct in this lesson). Advancement to next objective is authorized.`,
+          "Transition understanding to next curriculum milestone.",
+          "objective_demonstrated",
+        );
+      }
+
+      // RULE 5A: Supported Success -> Later Independent Assessment
+      if (latestResponse.assistanceLevel > 0) {
+        return independentCheck(
+          ["independent_check"],
+          "Student succeeded with scaffolded support / remediation. An independent assessment is now required to test unassisted mastery.",
+          "Demonstrate unassisted problem solving on a fresh item instance.",
+          "building_evidence",
+        );
+      }
+
+      // Within-lesson two-answer rule: stop scaffolding, keep assessing.
+      if (
+        consecutiveSuccesses >= LESSON_READY_STREAK &&
+        distinctStreakActivities >= LESSON_READY_STREAK
+      ) {
+        return independentCheck(
+          ["independent_check"],
+          `Student has ${consecutiveSuccesses} consecutive unassisted correct answers on distinct items. Within the lesson this ends guided practice and moves to a further independent check on a different question type. It does not advance the objective: the belief reducer reports ${objectiveStatus ?? "no status"}, and advancement needs its demonstrated status.`,
+          "Complete the independent evidence the belief reducer requires across distinct items and templates.",
+          "ready_for_demonstration_check",
+        );
+      }
+
+      // RULE 5B: Independent Success -> Further Independent Check
+      return independentCheck(
+        ["independent_check", "guided_practice"],
+        `Student achieved independent success (${consecutiveSuccesses} consecutive). Presenting next distinct independent check to build towards evidence threshold.`,
+        "Verify consistency across distinct question variations.",
+        "building_evidence",
+      );
+    }
+
+    // =========================================================================
+    // B. No response is waiting: sequence the teaching steps
+    // =========================================================================
+
+    // RULE 3: Initial Session Onboarding (0 activities delivered)
+    if (deliveredCount === 0 || !lastDelivered) {
+      return result(
+        ["explore", "demonstrate", "explain"],
+        "explore",
+        "Initial session step: engage learner with interactive simulation and hands-on discovery.",
+        "Introduce physical representation and verify basic tool familiarity.",
+        "teaching",
+      );
+    }
+
+    // The learner chose to continue after a pause: restart with a different route.
+    if (lastDelivered.action === "pause") {
+      return result(
+        ["demonstrate", "explain"],
+        "demonstrate",
+        "Learner chose to continue after a pause. Restarting with a foundational walkthrough that differs from the earlier exploration and explanation.",
+        "Rebuild the core idea before a supported check.",
+        "remediating",
+      );
+    }
+
+    const inRemediation = latestResponse !== undefined && !latestResponse.isCorrect;
+
+    // After a targeted exploration, a guided task comes before the supported check.
+    if (inRemediation && lastDelivered.action === "explore") {
+      return result(
+        ["guided_practice", "independent_check"],
+        "guided_practice",
+        "Targeted exploration completed. A structured guided task follows so the learner applies the corrected idea with support before being checked.",
+        "Verify ability to achieve guided objective criteria.",
+        "remediating",
+      );
+    }
+
+    if (inRemediation) {
+      return independentCheck(
+        ["independent_check"],
+        "Support for this difficulty has been delivered. A supported check on a fresh item follows; because it comes straight after support it is recorded as assisted and cannot count toward mastery.",
+        "Apply the corrected idea to a fresh item with support still recent.",
+        "remediating",
+      );
+    }
+
+    // RULE 6: Introductory/exploratory stage completed.
+    return independentCheck(
+      ["independent_check", "guided_practice", "explore"],
+      "Introductory/exploratory stage completed. A first independent check establishes what the learner can already do before any scaffolding is chosen.",
+      "Establish a first unassisted response on the objective.",
+      "building_evidence",
+    );
   }
 }

@@ -35,6 +35,9 @@ import {
   replayTransitions,
 } from "@gaps/domain";
 import { getLessonPlanner } from "./planner";
+import { redactActivityForStudent } from "./redact";
+import { getAdaptiveLesson } from "../teaching/adaptive-lessons";
+import { respondToAdaptiveLesson, startOrResumeAdaptiveLesson } from "../teaching/adaptive-session";
 import { generateDomainId } from "../session/engine";
 import { log } from "../log";
 
@@ -95,6 +98,8 @@ interface RecordLessonAssessmentParams {
   correctAnswer: string;
   isCorrect: boolean;
   assistanceLevel: 0 | 1;
+  /** Canonical misconception id (packages/domain), when the answer maps to one. */
+  misconceptionId?: string;
 }
 
 export async function recordLessonAssessment(params: RecordLessonAssessmentParams): Promise<{
@@ -179,6 +184,7 @@ export async function recordLessonAssessment(params: RecordLessonAssessmentParam
     rawAnswer: submittedAnswer.slice(0, 64),
     parsed: { kind: "choice", value: submittedAnswer, lowestTerms: true },
     outcome: isCorrect ? "correct" : "incorrect",
+    misconceptionId: isCorrect ? null : (params.misconceptionId ?? null),
     assistanceLevel,
     tryNo: 1,
     isReview: false,
@@ -297,6 +303,27 @@ export async function startOrResumeLessonSession(
   studentId: string,
   lessonId: string,
   db: DbClient = getDb(),
+): Promise<LessonSessionResponse> {
+  // Engine-driven lessons: each step is chosen by the teaching decision engine.
+  const adaptiveLesson = getAdaptiveLesson(lessonId);
+  if (adaptiveLesson) {
+    return startOrResumeAdaptiveLesson(studentId, adaptiveLesson, db);
+  }
+
+  // Fixed authored lessons. Answers to assessed checks are removed from the
+  // student-facing copy; grading happens in submitLessonActivityResponse.
+  const data = await startOrResumeFixedLesson(studentId, lessonId, db);
+  return {
+    ...data,
+    lesson: { ...data.lesson, activities: data.lesson.activities.map(redactActivityForStudent) },
+    activeActivity: data.activeActivity ? redactActivityForStudent(data.activeActivity) : undefined,
+  };
+}
+
+async function startOrResumeFixedLesson(
+  studentId: string,
+  lessonId: string,
+  db: DbClient,
 ): Promise<LessonSessionResponse> {
   const studentRepo = createStudentRepo(studentId, db);
 
@@ -454,6 +481,27 @@ export async function submitLessonActivityResponse(
   activityId: string,
   response: unknown,
   db: DbClient = getDb(),
+): Promise<LessonRespondResponse> {
+  const adaptiveLesson = getAdaptiveLesson(lessonId);
+  if (adaptiveLesson) {
+    return respondToAdaptiveLesson(studentId, adaptiveLesson, activityId, response, db);
+  }
+
+  const result = await submitFixedLessonResponse(studentId, lessonId, activityId, response, db);
+  return {
+    ...result,
+    activeActivity: result.activeActivity
+      ? redactActivityForStudent(result.activeActivity)
+      : undefined,
+  };
+}
+
+async function submitFixedLessonResponse(
+  studentId: string,
+  lessonId: string,
+  activityId: string,
+  response: unknown,
+  db: DbClient,
 ): Promise<LessonRespondResponse> {
   const studentRepo = createStudentRepo(studentId, db);
 
@@ -1206,6 +1254,10 @@ export async function getRecommendedNextAction(
       (counters.activeBranch as ActiveBranchState | null)?.stage === "stopping_point";
 
     if (hasStoppingPoint || belief?.status === "needs_support") {
+      const resumeLessonId =
+        counters.adaptive === true && typeof counters.lessonId === "string"
+          ? counters.lessonId
+          : topic.defaultLessonId;
       return {
         actionType: "revisit_unresolved",
         title: `Revisit: ${topic.studentTitle}`,
@@ -1213,7 +1265,7 @@ export async function getRecommendedNextAction(
         objectiveId: topic.conceptId as ConceptId,
         objectiveTitle: topic.studentTitle,
         subject: topic.subject,
-        lessonId: topic.defaultLessonId,
+        lessonId: resumeLessonId,
         ctaLabel: "Revisit Objective",
         reasonCode: hasStoppingPoint ? "SAVED_AT_STOPPING_POINT" : "STATUS_NEEDS_SUPPORT",
       };
@@ -1242,9 +1294,11 @@ export async function getRecommendedNextAction(
         (belief && (belief.independentN ?? 0) > 0 && belief.status !== "demonstrated"))
     ) {
       const targetLessonId =
-        topic.conceptId === "SCI-ELEC-CIRCUITS"
-          ? "lesson-sci-circuits-mastery"
-          : topic.defaultLessonId;
+        counters.adaptive === true && typeof counters.lessonId === "string"
+          ? counters.lessonId
+          : topic.conceptId === "SCI-ELEC-CIRCUITS"
+            ? "lesson-sci-circuits-mastery"
+            : topic.defaultLessonId;
 
       return {
         actionType: "fresh_check",

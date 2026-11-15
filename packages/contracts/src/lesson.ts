@@ -120,6 +120,12 @@ export const IndependentCheckConfigSchema = z.object({
   choices: z.array(z.object({ id: z.string(), text: z.string() })).optional(),
   correctAnswer: z.string(),
   explanation: z.string(),
+  /**
+   * Set by the server on student-facing copies of an activity. The answer and
+   * explanation are blanked and the response is graded on the server, so the
+   * correct answer never reaches the client before the item is resolved.
+   */
+  serverGraded: z.boolean().optional(),
 });
 export type IndependentCheckConfig = z.infer<typeof IndependentCheckConfigSchema>;
 
@@ -213,6 +219,18 @@ export const ActiveBranchStateSchema = z.object({
 });
 export type ActiveBranchState = z.infer<typeof ActiveBranchStateSchema>;
 
+/**
+ * Progress summary for a lesson whose steps are chosen one at a time by the
+ * teaching decision engine. Contains no assessment answers or decision evidence.
+ */
+export const AdaptiveLessonProgressSchema = z.object({
+  objectiveId: z.string(),
+  stepNumber: z.number().int().positive(),
+  isClosingStep: z.boolean(),
+  isPaused: z.boolean(),
+});
+export type AdaptiveLessonProgress = z.infer<typeof AdaptiveLessonProgressSchema>;
+
 export const LessonSessionResponseSchema = z.object({
   session: z.object({
     id: z.string(),
@@ -221,7 +239,10 @@ export const LessonSessionResponseSchema = z.object({
     mode: z.string(),
     stepSeq: z.number(),
   }),
-  lesson: LessonPlanSchema,
+  // An adaptive lesson lists only the steps delivered so far, so it may hold
+  // fewer than the two activities an authored plan requires.
+  lesson: LessonPlanSchema.extend({ activities: z.array(LessonActivitySchema) }),
+  adaptive: AdaptiveLessonProgressSchema.optional(),
   currentActivityIndex: z.number().int().nonnegative(),
   activeActivity: LessonActivitySchema.optional(),
   activeBranch: ActiveBranchStateSchema.nullable().optional(),
@@ -250,6 +271,7 @@ export const LessonRespondResponseSchema = z.object({
   isCompleted: z.boolean(),
   isSavedAndExited: z.boolean().optional(),
   sparksAwarded: z.number(),
+  adaptive: AdaptiveLessonProgressSchema.optional(),
 });
 export type LessonRespondResponse = z.infer<typeof LessonRespondResponseSchema>;
 
@@ -351,6 +373,11 @@ export const TeachingAssessedResponseSchema = z.object({
   assistanceLevel: z.number().int().min(0).max(2),
   misconceptionDetected: z.string().nullable().optional(),
   ambiguousError: z.boolean().default(false),
+  /**
+   * "diagnostic" marks a probe used only to choose a teaching route. Probes are
+   * never mastery evidence and never count toward a success streak.
+   */
+  kind: z.enum(["assessment", "diagnostic"]).optional(),
   timestamp: z.string(),
 });
 export type TeachingAssessedResponse = z.infer<typeof TeachingAssessedResponseSchema>;
@@ -364,6 +391,31 @@ export const DeliveredActivityRecordSchema = z.object({
 });
 export type DeliveredActivityRecord = z.infer<typeof DeliveredActivityRecordSchema>;
 
+export const ObjectiveBeliefStatusSchema = z.enum([
+  "not_assessed",
+  "needs_support",
+  "developing",
+  "demonstrated",
+  "retained",
+]);
+export type ObjectiveBeliefStatus = z.infer<typeof ObjectiveBeliefStatusSchema>;
+
+/**
+ * Where the learner is WITHIN the lesson. This is separate from the objective's
+ * belief status: only the belief reducer decides whether an objective is
+ * demonstrated, and only a demonstrated objective can be advanced.
+ */
+export const LessonProgressStageSchema = z.enum([
+  "teaching",
+  "building_evidence",
+  "ready_for_demonstration_check",
+  "objective_demonstrated",
+  "remediating",
+  "paused",
+  "consolidating",
+]);
+export type LessonProgressStage = z.infer<typeof LessonProgressStageSchema>;
+
 export const TeachingDecisionEvidenceSchema = z.object({
   rationale: z.string(),
   inferredMisconception: z.string().nullable().optional(),
@@ -371,6 +423,8 @@ export const TeachingDecisionEvidenceSchema = z.object({
   consecutiveSuccesses: z.number().int().nonnegative(),
   remediationCycle: z.number().int().nonnegative(),
   eligibleActions: z.array(LessonTeachingActionSchema),
+  objectiveStatus: ObjectiveBeliefStatusSchema.optional(),
+  lessonStage: LessonProgressStageSchema.optional(),
 });
 export type TeachingDecisionEvidence = z.infer<typeof TeachingDecisionEvidenceSchema>;
 
@@ -394,6 +448,16 @@ export const TeachingDecisionInputSchema = z.object({
   remediationCycleCount: z.number().int().nonnegative().default(0),
   subject: SubjectIdSchema.default("maths"),
   level: z.number().int().default(6),
+  /**
+   * Canonical belief status for the objective, computed by the belief reducer
+   * over stored evidence. Absent means "no evidence supplied": the policy then
+   * never authorizes objective advancement.
+   */
+  objectiveStatus: ObjectiveBeliefStatusSchema.optional(),
+  /** Authored assessment items already used and therefore not to be repeated. */
+  excludedItemIds: z.array(z.string()).optional(),
+  /** Unused authored assessment items left for this objective (absent = unknown). */
+  remainingCheckItems: z.number().int().nonnegative().optional(),
 });
 export type TeachingDecisionInput = z.infer<typeof TeachingDecisionInputSchema>;
 
@@ -429,6 +493,18 @@ export const TeachingDecisionTraceEntrySchema = z.object({
   eligibleActions: z.array(LessonTeachingActionSchema),
   source: z.enum(["authored", "llm_suggested", "fallback"]),
   timestamp: z.string(),
+  objectiveStatus: ObjectiveBeliefStatusSchema.optional(),
+  lessonStage: LessonProgressStageSchema.optional(),
+  /** Assistance level the server fixed for this step when it was delivered. */
+  assistanceLevel: z.number().int().min(0).max(2).optional(),
+  /** What the learner did with this step (comparison harness and session trace). */
+  learnerResponse: z
+    .object({
+      submittedAnswer: z.string(),
+      isCorrect: z.boolean().optional(),
+      countedAsEvidence: z.boolean(),
+    })
+    .optional(),
 });
 export type TeachingDecisionTraceEntry = z.infer<typeof TeachingDecisionTraceEntrySchema>;
 

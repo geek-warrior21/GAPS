@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   getDb,
   conceptBeliefs,
@@ -636,7 +636,8 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await wrongFreshChoice.click();
     await page.click("button:has-text('Submit Answer')");
     await expect(page.getByText("Good Try — Learning Opportunity")).toBeVisible();
-    await page.click("button:has-text('Submit & Continue')");
+    // The check was graded by the server on "Submit Answer"; this moves on.
+    await page.click("[data-testid='check-continue-button']");
 
     // ADAPTIVE TRIGGER 3: Stopping Point reached for continued difficulty
     await expect(page.getByText("Support & Reflection")).toBeVisible();
@@ -736,7 +737,8 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await correctFresh.click();
     await page.click("button:has-text('Submit Answer')");
     await expect(page.getByText("Correct Response!")).toBeVisible();
-    await page.click("button:has-text('Submit & Continue')");
+    // The check was graded by the server on "Submit Answer"; this moves on.
+    await page.click("[data-testid='check-continue-button']");
 
     // Advances to Guided Challenge
     await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
@@ -810,7 +812,8 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await wrongFreshChoice.click();
     await page.click("button:has-text('Submit Answer')");
     await expect(page.getByText("Good Try — Learning Opportunity")).toBeVisible();
-    await page.click("button:has-text('Submit & Continue')");
+    // The check was graded by the server on "Submit Answer"; this moves on.
+    await page.click("[data-testid='check-continue-button']");
 
     // Stopping Point reached
     await expect(page.getByText("Support & Reflection")).toBeVisible();
@@ -938,7 +941,8 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await airGapChoice.click();
     await page.click("button:has-text('Submit Answer')");
     await expect(page.getByText("Correct Response!")).toBeVisible();
-    await page.click("button:has-text('Submit & Continue')");
+    // The check was graded by the server on "Submit Answer"; this moves on.
+    await page.click("[data-testid='check-continue-button']");
 
     // Mastery Lesson: Activity 3: Independent Check 3 (Template 2: Breaks, Item 3: Detecting Circuit Breaks)
     await expect(
@@ -1050,62 +1054,63 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     const resultsContainer = page.locator("[data-testid='comparison-results-container']");
     await expect(resultsContainer).toBeVisible();
 
+    // The comparison replays the same sequencer as persisted student sessions,
+    // so every delivered step is listed, including the checks themselves.
+    const step = (learner: "struggling" | "succeeding", n: number) =>
+      page.locator(`[data-testid='trace-${learner}-step-${n}']`);
+
     // Verify Learner A (Struggling) Column
     await expect(page.getByText("Learner A: Struggling")).toBeVisible();
     await expect(page.getByText("Scaffolded Adaptive Interventions")).toBeVisible();
-    // Step 1: explore
-    await expect(page.locator("[data-testid='trace-struggling-step-1']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-struggling-step-1']")).toContainText(
-      "Action: explore",
-    );
-    // Step 2: explore (targeted fraction manipulation triggered by REVERSAL misconception)
-    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toContainText(
-      "Action: explore",
-    );
-    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toContainText(
-      "Misconception Detected: REVERSAL",
-    );
-    // Step 3: independent_check (triggered by ambiguous error -> diagnostic probe)
-    await expect(page.locator("[data-testid='trace-struggling-step-3']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-struggling-step-3']")).toContainText(
-      "Action: independent_check",
-    );
-    await expect(page.locator("[data-testid='trace-struggling-step-3']")).toContainText(
+    await expect(step("struggling", 1)).toContainText("Action: explore");
+    // Step 2: first unassisted check, answered with the reversal distractor
+    await expect(step("struggling", 2)).toContainText("Action: independent_check");
+    await expect(step("struggling", 2)).toContainText("Check recorded as: independent");
+    // Step 3: targeted fraction manipulation triggered by the REVERSAL misconception
+    await expect(step("struggling", 3)).toContainText("Action: explore");
+    await expect(step("struggling", 3)).toContainText("Misconception Detected: REVERSAL");
+    await expect(step("struggling", 4)).toContainText("Action: guided_practice");
+    // Step 5: supported check straight after remediation is recorded as assisted
+    await expect(step("struggling", 5)).toContainText("Action: independent_check");
+    await expect(step("struggling", 5)).toContainText("assisted (cannot count toward mastery)");
+    // Step 6: ambiguous error -> diagnostic probe, which is not evidence
+    await expect(step("struggling", 6)).toContainText("Action: independent_check");
+    await expect(step("struggling", 6)).toContainText(
       "Ambiguous Error → Diagnostic Probe Activated",
     );
-    // Step 4: explain (alternative explanation after continued difficulty)
-    await expect(page.locator("[data-testid='trace-struggling-step-4']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-struggling-step-4']")).toContainText(
-      "Action: explain",
-    );
-    // Final Step 5: pause (due to bounded remediation loop)
-    await expect(page.locator("[data-testid='trace-struggling-step-5']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-struggling-step-5']")).toContainText(
-      "Action: pause",
-    );
+    await expect(step("struggling", 6)).toContainText("not evidence");
+    // Step 7: alternative explanation after continued difficulty
+    await expect(step("struggling", 7)).toContainText("Action: explain");
+    await expect(step("struggling", 8)).toContainText("Action: independent_check");
+    // Final step 9: pause (bounded remediation loop)
+    await expect(step("struggling", 9)).toContainText("Action: pause");
+    await expect(step("struggling", 10)).toHaveCount(0);
+    await expect(page.getByText("Status: paused_at_stopping_point")).toBeVisible();
 
     // Verify Learner B (Succeeding) Column
     await expect(page.getByText("Learner B: Succeeding Independently")).toBeVisible();
     await expect(page.getByText("Independent Mastery & Progression")).toBeVisible();
-    // Step 1: explore
-    await expect(page.locator("[data-testid='trace-succeeding-step-1']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-succeeding-step-1']")).toContainText(
-      "Action: explore",
+    await expect(step("succeeding", 1)).toContainText("Action: explore");
+    await expect(step("succeeding", 2)).toContainText("Action: independent_check");
+    await expect(step("succeeding", 3)).toContainText("Action: independent_check");
+    // Step 4: two correct answers move the lesson on, but the objective is not
+    // advanced. The belief reducer still reports "developing" and the server
+    // envelope does not offer advance.
+    await expect(step("succeeding", 4)).toContainText("Action: independent_check");
+    await expect(step("succeeding", 4)).toContainText(
+      "Objective status (belief reducer): developing",
     );
-    // Step 2: independent_check
-    await expect(page.locator("[data-testid='trace-succeeding-step-2']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-succeeding-step-2']")).toContainText(
-      "Action: independent_check",
+    await expect(step("succeeding", 4)).toContainText("ready_for_demonstration_check");
+    await expect(step("succeeding", 4)).not.toContainText("Action: advance");
+    // Step 5: advance, authorized only once the belief reducer reports demonstrated
+    await expect(step("succeeding", 5)).toContainText("Action: advance");
+    await expect(step("succeeding", 5)).toContainText(
+      "Objective status (belief reducer): demonstrated",
     );
-    // Step 3: advance (authorized by server policy envelope after distinct unassisted successes)
-    await expect(page.locator("[data-testid='trace-succeeding-step-3']")).toBeVisible();
-    await expect(page.locator("[data-testid='trace-succeeding-step-3']")).toContainText(
-      "Action: advance",
-    );
+    await expect(page.getByText("Status: mastery_demonstrated_advanced")).toBeVisible();
 
     // 6. Test Step Preview interactivity
-    const previewBtn = page.locator("[data-testid='preview-activity-struggling-2']");
+    const previewBtn = page.locator("[data-testid='preview-activity-struggling-3']");
     await expect(previewBtn).toBeVisible();
     await previewBtn.click();
 
@@ -1119,11 +1124,296 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await runBtn.click();
 
     // Verify science trace shows circuit exploration, AIR_GAP remediation, and advance
-    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toContainText(
-      "Misconception Detected: AIR_GAP",
+    await expect(step("struggling", 3)).toContainText("Misconception Detected: AIR_GAP");
+    await expect(step("struggling", 3)).toContainText("Testing the Open Switch Air Gap");
+    await expect(step("struggling", 9)).toContainText("Action: pause");
+    await expect(step("succeeding", 4)).not.toContainText("Action: advance");
+    await expect(step("succeeding", 5)).toContainText("Action: advance");
+  });
+
+  // ===========================================================================
+  // Engine-driven lessons in real, persisted student sessions
+  // ===========================================================================
+
+  const adaptiveLearner = (projectName: string) => {
+    const isMobile = projectName.includes("Mobile");
+    return {
+      username: isMobile ? "priya" : "rohan",
+      pin: isMobile ? "888888" : "777777",
+      studentId: isMobile ? "stu_01J00000000000000000000006" : "stu_01J00000000000000000000005",
+    };
+  };
+
+  const signIn = async (page: Page, username: string, pin: string) => {
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", username);
+    await page.fill("#pin", pin);
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+  };
+
+  /** Records every lesson API payload so a test can prove no answer reached the browser. */
+  const recordLessonPayloads = (page: Page) => {
+    const bodies: string[] = [];
+    page.on("response", async (res) => {
+      if (!res.url().includes("/api/v1/lessons/")) return;
+      try {
+        bodies.push(await res.text());
+      } catch {
+        // Response body unavailable after navigation; nothing to record.
+      }
+    });
+    return bodies;
+  };
+
+  const expectNoAnswersInPayloads = (bodies: string[]) => {
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).not.toMatch(/"correctAnswer":"[^"]+"/);
+      expect(body).not.toContain("adaptiveState");
+      expect(body).not.toContain("rationale");
+    }
+  };
+
+  /** Answers the check on screen, waits for the server's verdict, and continues. */
+  const answerCheck = async (page: Page, choiceText: string, verdict: "correct" | "not yet") => {
+    const choice = page.locator(`button:has-text("${choiceText}")`);
+    await expect(choice).toBeVisible();
+    await choice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(
+      page.getByText(
+        verdict === "correct" ? "Correct Response!" : "Good Try — Learning Opportunity",
+      ),
+    ).toBeVisible();
+    await page.click("[data-testid='check-continue-button']");
+  };
+
+  const stepLabel = (page: Page) => page.locator("[data-testid='adaptive-step-label']");
+
+  test("S20: Fractions step-by-step lesson, succeeding learner: reload keeps the question, two correct answers do not advance, three demonstrate", async ({
+    page,
+  }, testInfo) => {
+    const learner = adaptiveLearner(testInfo.project.name);
+    await resetStudentEvidence([learner.studentId]);
+    const payloads = recordLessonPayloads(page);
+    await signIn(page, learner.username, learner.pin);
+
+    await page.goto("/learn");
+    await page.locator("[data-testid='start-maths-adaptive-lesson-button']").click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-adaptive/);
+
+    // Step 1: opening exploration chosen by the engine
+    await expect(stepLabel(page)).toHaveText("STEP 1");
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Step 2: first check. Reloading shows the same stored question.
+    await expect(stepLabel(page)).toHaveText("STEP 2");
+    const firstQuestion = "A paper strip is divided into 5 equal parts. 2 parts are shaded.";
+    await expect(page.getByText(firstQuestion)).toBeVisible();
+    await page.reload();
+    await expect(stepLabel(page)).toHaveText("STEP 2");
+    await expect(page.getByText(firstQuestion)).toBeVisible();
+    await answerCheck(page, "2/5 (two-fifths)", "correct");
+
+    // Step 3: a different question
+    await expect(stepLabel(page)).toHaveText("STEP 3");
+    await expect(page.getByText("Which statement describes the fraction 3/7?")).toBeVisible();
+    await answerCheck(page, "3 parts chosen out of 7 equal parts in the whole", "correct");
+
+    // Step 4: two correct answers moved the lesson on, but did NOT advance the
+    // objective: another independent check is shown, not the milestone.
+    await expect(stepLabel(page)).toHaveText("STEP 4");
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    await expect(page.getByText("Mastery Demonstrated")).toHaveCount(0);
+    await answerCheck(page, "3/8 (three-eighths)", "correct");
+
+    // Step 5: the belief reducer now reports demonstrated -> milestone
+    await expect(stepLabel(page)).toHaveText("STEP 5");
+    await expect(page.getByText("Mastery Demonstrated: Parts of a Whole!")).toBeVisible();
+    await page.click("button:has-text('Finish Lesson')");
+
+    await expect(page.getByText("Outstanding Effort!")).toBeVisible();
+    await page.click("button:has-text('Return to Curriculum')");
+    await expect(page).toHaveURL(/\/learn/);
+    await expect(page.getByText("🚀 Next Milestone")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Next Objective: Equal pieces & equivalence" }),
+    ).toBeVisible();
+
+    expectNoAnswersInPayloads(payloads);
+  });
+
+  test("S21: Circuits step-by-step lesson, struggling learner: experiment, guided task, diagnostic probe, new explanation, pause, save and resume", async ({
+    page,
+  }, testInfo) => {
+    const learner = adaptiveLearner(testInfo.project.name);
+    await resetStudentEvidence([learner.studentId]);
+    const payloads = recordLessonPayloads(page);
+    await signIn(page, learner.username, learner.pin);
+
+    await page.goto("/learn");
+    await page.locator("[data-testid='tab-subject-science']").click();
+    await page.locator("[data-testid='start-circuits-adaptive-lesson-button']").click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-adaptive/);
+
+    // Step 1: opening exploration
+    await expect(stepLabel(page)).toHaveText("STEP 1");
+    await page.click("button:has-text('Next Step')");
+
+    // Step 2: first check answered with the air-gap misconception
+    await expect(page.getByText("The switch in a simple circuit is opened.")).toBeVisible();
+    await answerCheck(
+      page,
+      "It keeps glowing, because current jumps across the small gap",
+      "not yet",
     );
-    await expect(page.locator("[data-testid='trace-succeeding-step-3']")).toContainText(
-      "Action: advance",
+
+    // Step 3: targeted circuit experiment for that misconception
+    await expect(stepLabel(page)).toHaveText("STEP 3");
+    await expect(
+      page.getByRole("heading", { name: "Targeted Lab: Testing the Open Switch Air Gap" }),
+    ).toBeVisible();
+    await page.getByTestId("toggle-circuit-switch").click();
+    await page.click("button:has-text('Next Step')");
+
+    // Step 4: guided task
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    await page.getByTestId("toggle-circuit-switch").click();
+    await page.click("button:has-text('Check Solution')");
+    await expect(page.getByText("Goal Achieved!")).toBeVisible();
+    await page.click("button:has-text('Continue')");
+
+    // Step 5: supported check, reloaded first, then answered with an
+    // unclassified distractor
+    await expect(stepLabel(page)).toHaveText("STEP 5");
+    await expect(page.getByText("One wire slips off the battery terminal.")).toBeVisible();
+    await page.reload();
+    await expect(stepLabel(page)).toHaveText("STEP 5");
+    await expect(page.getByText("One wire slips off the battery terminal.")).toBeVisible();
+    await answerCheck(page, "The bulb glows brighter, because less wire is in use", "not yet");
+
+    // Step 6: ambiguous error -> diagnostic probe rather than an assumed misconception
+    await expect(
+      page.getByRole("heading", { name: "Diagnostic Check: Circuit Path Requirement" }),
+    ).toBeVisible();
+    await answerCheck(page, "Just one wire touching the bulb, with no way back", "not yet");
+
+    // Step 7: a different explanation
+    await expect(stepLabel(page)).toHaveText("STEP 7");
+    await expect(page.getByText("Electricity is Like a Closed Train Track")).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Step 8: supported check, missed again -> the server requires a pause
+    await expect(
+      page.getByText("Which condition is needed for a bulb in a circuit to glow?"),
+    ).toBeVisible();
+    await answerCheck(page, "One wire from the battery to the bulb, with no path back", "not yet");
+
+    await expect(stepLabel(page)).toHaveText("STEP 9");
+    await expect(page.getByText("Support & Reflection", { exact: true })).toBeVisible();
+    await expect(page.getByText("Let's Pause & Review Circuit Fundamentals")).toBeVisible();
+    await page.click("button:has-text('Save & Finish for Now')");
+
+    // Saved: Learn recommends revisiting, and links back to this same lesson
+    await expect(page).toHaveURL(/\/learn/);
+    await page.locator("[data-testid='tab-subject-science']").click();
+    await expect(page.getByText("Action on Return: Revisit Objective")).toBeVisible();
+    await page.locator("[data-testid='next-action-button']").click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-adaptive/);
+
+    // Resumed at the stored stopping point, also after a reload
+    await expect(stepLabel(page)).toHaveText("STEP 9");
+    await expect(page.getByText("Let's Pause & Review Circuit Fundamentals")).toBeVisible();
+    await page.reload();
+    await expect(stepLabel(page)).toHaveText("STEP 9");
+    await expect(page.getByText("Let's Pause & Review Circuit Fundamentals")).toBeVisible();
+
+    // The struggling path never showed a milestone or student-facing "wrong"/"failed"
+    await expect(page.getByText("Mastery Demonstrated")).toHaveCount(0);
+    await expect(page.getByText(/\b(wrong|failed)\b/i)).toHaveCount(0);
+
+    expectNoAnswersInPayloads(payloads);
+  });
+
+  test("S22: Circuits step-by-step lesson, succeeding learner demonstrates the objective through three distinct checks", async ({
+    page,
+  }, testInfo) => {
+    const learner = adaptiveLearner(testInfo.project.name);
+    await resetStudentEvidence([learner.studentId]);
+    await signIn(page, learner.username, learner.pin);
+
+    await page.goto("/lesson/lesson-sci-circuits-adaptive");
+    await expect(stepLabel(page)).toHaveText("STEP 1");
+    await page.click("button:has-text('Next Step')");
+
+    await answerCheck(
+      page,
+      "It goes dark, because the open switch leaves a gap the current cannot cross",
+      "correct",
     );
+    await answerCheck(page, "The bulb goes off, because the loop is broken", "correct");
+
+    // Two correct answers: still a check, no milestone yet
+    await expect(stepLabel(page)).toHaveText("STEP 4");
+    await expect(page.getByText("Mastery Demonstrated")).toHaveCount(0);
+    await answerCheck(
+      page,
+      "A complete loop from one battery terminal, through the bulb, back to the other terminal",
+      "correct",
+    );
+
+    await expect(page.getByText("Mastery Demonstrated: Electric Circuits!")).toBeVisible();
+    await page.click("button:has-text('Finish Lesson')");
+    await expect(page.getByText("Outstanding Effort!")).toBeVisible();
+    await page.click("button:has-text('Return to Curriculum')");
+    await page.locator("[data-testid='tab-subject-science']").click();
+    await expect(
+      page.getByRole("heading", { name: "Next Objective: Conductors and insulators" }),
+    ).toBeVisible();
+  });
+
+  test("S23: Fractions step-by-step lesson, struggling learner: reversal leads to a targeted strip lab and guided task, and a supported answer does not finish the objective", async ({
+    page,
+  }, testInfo) => {
+    const learner = adaptiveLearner(testInfo.project.name);
+    await resetStudentEvidence([learner.studentId]);
+    await signIn(page, learner.username, learner.pin);
+
+    await page.goto("/lesson/lesson-maths-frac-part-adaptive");
+    await expect(stepLabel(page)).toHaveText("STEP 1");
+    await page.click("button:has-text('Next Step')");
+
+    // Numerator/denominator reversal on the first check
+    await answerCheck(page, "5/2 (five-halves)", "not yet");
+
+    // Targeted fraction manipulation, then a guided task (build 3/4)
+    await expect(
+      page.getByRole("heading", { name: "Targeted Lab: Denominator Controls the Slices" }),
+    ).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    const plusShaded = page.locator("button[aria-label='Increase shaded parts']");
+    await plusShaded.click();
+    await plusShaded.click();
+    await page.click("button:has-text('Check Solution')");
+    await expect(page.getByText("Goal Achieved!")).toBeVisible();
+    await page.click("button:has-text('Continue')");
+
+    // Supported check answered correctly: the lesson continues with a fresh
+    // independent check rather than a milestone.
+    await expect(stepLabel(page)).toHaveText("STEP 5");
+    await answerCheck(page, "3 parts chosen out of 7 equal parts in the whole", "correct");
+    await expect(stepLabel(page)).toHaveText("STEP 6");
+    await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
+    await expect(page.getByText("Mastery Demonstrated")).toHaveCount(0);
+
+    // Leaving and returning resumes the same step
+    await page.goto("/learn");
+    await page.goto("/lesson/lesson-maths-frac-part-adaptive");
+    await expect(stepLabel(page)).toHaveText("STEP 6");
+    await expect(page.getByText("A chocolate bar has 8 equal pieces.")).toBeVisible();
   });
 });

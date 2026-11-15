@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { SubjectIdSchema } from "@gaps/contracts";
-import { runTeachingDecisionComparison } from "@/server/teaching/compare";
+import {
+  runTeachingDecisionComparison,
+  UnsupportedObjectiveError,
+} from "@/server/teaching/compare";
 
 const CompareRequestSchema = z.object({
   subject: SubjectIdSchema.default("maths"),
@@ -24,6 +27,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof UnsupportedObjectiveError) {
+      return NextResponse.json(
+        { error: { code: "UNSUPPORTED_OBJECTIVE", message: err.message } },
+        { status: 400 },
+      );
+    }
     return NextResponse.json(
       {
         error: {

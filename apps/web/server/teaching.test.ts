@@ -82,7 +82,12 @@ describe("Next-Step Teaching Decision Engine", () => {
       expect(policy.eligibleActions).toContain("independent_check");
     });
 
-    it("authorizes advance when student demonstrates sufficient independent evidence (consecutive successes across distinct items)", () => {
+    // Acceptance question B. The original test here expected `advance` after two
+    // consecutive correct answers. That let the teaching policy advance an
+    // objective the belief reducer (SPEC §9 / §19.4: 3 distinct items across 2
+    // templates) had not marked demonstrated. The two-answer rule is kept as a
+    // within-lesson signal; objective advancement now requires the reducer.
+    const twoDistinctUnassistedCorrect = (): TeachingDecisionInput => {
       const resp1: TeachingAssessedResponse = {
         activityId: "act_check_1",
         conceptId: "MATH-FRAC-PART",
@@ -101,8 +106,7 @@ describe("Next-Step Teaching Decision Engine", () => {
         ambiguousError: false,
         timestamp: new Date().toISOString(),
       };
-
-      const policy = TeachingPolicyEngine.evaluatePolicy({
+      return {
         ...baseMathsInput,
         previouslyDeliveredActivities: [
           {
@@ -121,11 +125,132 @@ describe("Next-Step Teaching Decision Engine", () => {
           },
         ],
         recentAssessedResponses: [resp1, resp2],
+      };
+    };
+
+    it("two distinct unassisted correct answers move the learner on within the lesson but do not advance the objective", () => {
+      const policy = TeachingPolicyEngine.evaluatePolicy({
+        ...twoDistinctUnassistedCorrect(),
+        objectiveStatus: "developing",
       });
 
-      expect(policy.eligibleActions).toContain("advance");
-      expect(policy.recommendedAction).toBe("advance");
       expect(policy.evidence.consecutiveSuccesses).toBe(2);
+      expect(policy.eligibleActions).not.toContain("advance");
+      // Scaffolding ends: only a further independent check is eligible.
+      expect(policy.eligibleActions).toEqual(["independent_check"]);
+      expect(policy.recommendedAction).toBe("independent_check");
+      expect(policy.evidence.lessonStage).toBe("ready_for_demonstration_check");
+      expect(policy.evidence.objectiveStatus).toBe("developing");
+    });
+
+    it("never authorizes advance when no belief status is supplied, however long the streak", () => {
+      const policy = TeachingPolicyEngine.evaluatePolicy(twoDistinctUnassistedCorrect());
+      expect(policy.eligibleActions).not.toContain("advance");
+      expect(policy.recommendedAction).toBe("independent_check");
+    });
+
+    it("authorizes advance only when the belief reducer reports the objective demonstrated", () => {
+      for (const objectiveStatus of ["demonstrated", "retained"] as const) {
+        const policy = TeachingPolicyEngine.evaluatePolicy({
+          ...twoDistinctUnassistedCorrect(),
+          objectiveStatus,
+        });
+        expect(policy.eligibleActions).toContain("advance");
+        expect(policy.recommendedAction).toBe("advance");
+        expect(policy.evidence.lessonStage).toBe("objective_demonstrated");
+      }
+
+      for (const objectiveStatus of ["not_assessed", "needs_support", "developing"] as const) {
+        const policy = TeachingPolicyEngine.evaluatePolicy({
+          ...twoDistinctUnassistedCorrect(),
+          objectiveStatus,
+        });
+        expect(policy.eligibleActions).not.toContain("advance");
+      }
+    });
+
+    it("does not advance a demonstrated objective on an incorrect or assisted latest answer path", () => {
+      const input = twoDistinctUnassistedCorrect();
+      const policy = TeachingPolicyEngine.evaluatePolicy({
+        ...input,
+        objectiveStatus: "demonstrated",
+        recentAssessedResponses: [
+          ...input.recentAssessedResponses,
+          {
+            activityId: "act_check_3",
+            conceptId: "MATH-FRAC-PART",
+            submittedAnswer: "5/2",
+            isCorrect: false,
+            assistanceLevel: 0,
+            misconceptionDetected: "REVERSAL",
+            ambiguousError: false,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
+      expect(policy.eligibleActions).not.toContain("advance");
+      expect(policy.recommendedAction).toBe("explore");
+    });
+
+    it("a diagnostic probe never counts toward the success streak and is asked at most once", () => {
+      const probeCorrect: TeachingAssessedResponse = {
+        activityId: "act_probe",
+        conceptId: "MATH-FRAC-PART",
+        submittedAnswer: "c_total",
+        isCorrect: true,
+        assistanceLevel: 0,
+        ambiguousError: false,
+        kind: "diagnostic",
+        timestamp: new Date().toISOString(),
+      };
+      const afterProbe = TeachingPolicyEngine.evaluatePolicy({
+        ...baseMathsInput,
+        objectiveStatus: "developing",
+        previouslyDeliveredActivities: [
+          {
+            id: "act_probe",
+            type: "independent_check",
+            title: "Probe",
+            action: "independent_check",
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        recentAssessedResponses: [probeCorrect],
+      });
+      expect(afterProbe.evidence.consecutiveSuccesses).toBe(0);
+      expect(afterProbe.recommendedAction).toBe("independent_check");
+      expect(afterProbe.evidence.rationale).toContain("not mastery evidence");
+
+      // A second ambiguous error after a probe goes to teaching, not another probe.
+      const secondAmbiguous = TeachingPolicyEngine.evaluatePolicy({
+        ...baseMathsInput,
+        objectiveStatus: "developing",
+        previouslyDeliveredActivities: [],
+        recentAssessedResponses: [
+          probeCorrect,
+          {
+            activityId: "act_check_9",
+            conceptId: "MATH-FRAC-PART",
+            submittedAnswer: "c_2_7",
+            isCorrect: false,
+            assistanceLevel: 0,
+            misconceptionDetected: null,
+            ambiguousError: true,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
+      expect(secondAmbiguous.recommendedAction).toBe("explore");
+    });
+
+    it("closes the lesson without advancing when no unused authored check remains", () => {
+      const policy = TeachingPolicyEngine.evaluatePolicy({
+        ...twoDistinctUnassistedCorrect(),
+        objectiveStatus: "developing",
+        remainingCheckItems: 0,
+      });
+      expect(policy.eligibleActions).toEqual(["pause"]);
+      expect(policy.evidence.lessonStage).toBe("consolidating");
     });
 
     it("bounds remediation loops: mandates pause when remediationCycle >= 2 and student continues struggling", () => {
@@ -402,53 +527,85 @@ describe("Next-Step Teaching Decision Engine", () => {
   });
 
   describe("5. Visible Comparison: Struggling vs. Succeeding Synthetic Learners (Requirement 6)", () => {
-    it("generates materially distinct sequences for struggling vs succeeding learners on Fractions", async () => {
-      const comparison = await runTeachingDecisionComparison("maths", "MATH-FRAC-PART");
+    // The comparison now replays the same sequencer that persisted student
+    // sessions use, with objective status from the real belief reducer, so the
+    // trace lists every delivered step (including the checks themselves).
+    for (const [subject, objectiveId, misconception] of [
+      ["maths", "MATH-FRAC-PART", "REVERSAL"],
+      ["science", "SCI-ELEC-CIRCUITS", "AIR_GAP"],
+    ] as const) {
+      it(`generates materially distinct sequences for struggling vs succeeding learners on ${objectiveId}`, async () => {
+        const comparison = await runTeachingDecisionComparison(subject, objectiveId);
 
-      expect(comparison.objectiveId).toBe("MATH-FRAC-PART");
-      expect(comparison.subject).toBe("maths");
+        expect(comparison.objectiveId).toBe(objectiveId);
+        expect(comparison.subject).toBe(subject);
 
-      const strugglingTrace = comparison.traces.struggling;
-      const succeedingTrace = comparison.traces.succeeding;
+        const struggling = comparison.traces.struggling;
+        const succeeding = comparison.traces.succeeding;
+        const strugglingActions = struggling.decisions.map((d) => d.action);
+        const succeedingActions = succeeding.decisions.map((d) => d.action);
 
-      // Both start with explore
-      expect(strugglingTrace.decisions[0]?.action).toBe("explore");
-      expect(succeedingTrace.decisions[0]?.action).toBe("explore");
+        // Same objective, same opening step, different sequences afterwards.
+        expect(strugglingActions[0]).toBe("explore");
+        expect(succeedingActions[0]).toBe("explore");
+        expect(strugglingActions[1]).toBe("independent_check");
+        expect(succeedingActions[1]).toBe("independent_check");
+        expect(struggling.decisions[1]?.activityId).toBe(succeeding.decisions[1]?.activityId);
+        expect(strugglingActions).not.toEqual(succeedingActions);
 
-      // Struggling sequence undergoes targeted interventions and terminates at pause
-      const strugglingActions = strugglingTrace.decisions.map((d) => d.action);
-      expect(strugglingActions).toContain("explore");
-      expect(strugglingActions).toContain("independent_check"); // Diagnostic probe
-      expect(strugglingActions).toContain("explain"); // Denominator down rule
-      expect(strugglingActions).toContain("pause"); // Mandatory bounded pause
-      expect(strugglingTrace.finalStatus).toBe("paused_at_stopping_point");
-      expect(strugglingTrace.masteryDemonstrated).toBe(false);
+        // Struggling: named misconception -> targeted exploration -> guided task ->
+        // supported check -> ambiguous error -> diagnostic probe -> alternative
+        // explanation -> supported check -> bounded pause.
+        expect(strugglingActions).toEqual([
+          "explore",
+          "independent_check",
+          "explore",
+          "guided_practice",
+          "independent_check",
+          "independent_check",
+          "explain",
+          "independent_check",
+          "pause",
+        ]);
+        expect(struggling.decisions[2]?.inferredMisconception).toBe(misconception);
+        expect(struggling.decisions[5]?.isAmbiguous).toBe(true);
+        expect(struggling.decisions[5]?.learnerResponse?.countedAsEvidence).toBe(false);
+        // Checks taken straight after support are recorded as assisted.
+        expect(struggling.decisions[1]?.assistanceLevel).toBe(0);
+        expect(struggling.decisions[4]?.assistanceLevel).toBe(1);
+        expect(struggling.decisions[7]?.assistanceLevel).toBe(1);
+        expect(struggling.finalStatus).toBe("paused_at_stopping_point");
+        expect(struggling.masteryDemonstrated).toBe(false);
+        expect(strugglingActions).not.toContain("advance");
 
-      // Succeeding sequence achieves consecutive independent checks and advances
-      const succeedingActions = succeedingTrace.decisions.map((d) => d.action);
-      expect(succeedingActions).toContain("explore");
-      expect(succeedingActions).toContain("independent_check");
-      expect(succeedingActions).toContain("advance");
-      expect(succeedingTrace.finalStatus).toBe("mastery_demonstrated_advanced");
-      expect(succeedingTrace.masteryDemonstrated).toBe(true);
-    });
+        // Succeeding: three unassisted checks on distinct items before advance.
+        expect(succeedingActions).toEqual([
+          "explore",
+          "independent_check",
+          "independent_check",
+          "independent_check",
+          "advance",
+        ]);
+        const checks = succeeding.decisions.filter((d) => d.action === "independent_check");
+        expect(new Set(checks.map((d) => d.activityId)).size).toBe(3);
+        expect(checks.every((d) => d.assistanceLevel === 0)).toBe(true);
+        // After two correct answers the lesson moves on, but the objective has not.
+        expect(succeeding.decisions[3]?.lessonStage).toBe("ready_for_demonstration_check");
+        expect(succeeding.decisions[3]?.objectiveStatus).toBe("developing");
+        expect(succeeding.decisions[3]?.eligibleActions).not.toContain("advance");
+        // Advance appears only once the reducer reports demonstrated.
+        expect(succeeding.decisions[4]?.objectiveStatus).toBe("demonstrated");
+        expect(succeeding.finalStatus).toBe("mastery_demonstrated_advanced");
+        expect(succeeding.masteryDemonstrated).toBe(true);
+        expect(succeedingActions).not.toContain("guided_practice");
+        expect(succeedingActions).not.toContain("pause");
+      });
+    }
 
-    it("generates materially distinct sequences for struggling vs succeeding learners on Circuits", async () => {
-      const comparison = await runTeachingDecisionComparison("science", "SCI-ELEC-CIRCUITS");
-
-      expect(comparison.objectiveId).toBe("SCI-ELEC-CIRCUITS");
-      expect(comparison.subject).toBe("science");
-
-      const strugglingTrace = comparison.traces.struggling;
-      const succeedingTrace = comparison.traces.succeeding;
-
-      expect(strugglingTrace.decisions[1]?.inferredMisconception).toBe("AIR_GAP");
-      expect(strugglingTrace.decisions.some((d) => d.action === "pause")).toBe(true);
-
-      expect(succeedingTrace.decisions[succeedingTrace.decisions.length - 1]?.action).toBe(
-        "advance",
+    it("rejects an objective that has no authored item bank instead of improvising checks", async () => {
+      await expect(runTeachingDecisionComparison("maths", "MATH-FRAC-EQUIV")).rejects.toThrow(
+        "No authored item bank",
       );
-      expect(succeedingTrace.masteryDemonstrated).toBe(true);
     });
   });
 });

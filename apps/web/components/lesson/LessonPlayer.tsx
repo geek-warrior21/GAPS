@@ -150,11 +150,45 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
   const [sessionData, setSessionData] = useState<LessonSessionResponse>(initialData);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // A server-graded check keeps its result on screen until the learner continues.
+  const [pendingResult, setPendingResult] = useState<LessonRespondResponse | null>(null);
 
   const { lesson, currentActivityIndex, isCompleted } = sessionData;
+  const adaptive = sessionData.adaptive;
   const currentActivity = sessionData.activeActivity ?? lesson.activities[currentActivityIndex];
-  const isFinalActivity =
-    currentActivityIndex + 1 >= lesson.activities.length && !sessionData.activeBranch;
+  const isFinalActivity = adaptive
+    ? adaptive.isClosingStep
+    : currentActivityIndex + 1 >= lesson.activities.length && !sessionData.activeBranch;
+
+  const applyResult = (answered: LessonActivity, result: LessonRespondResponse) => {
+    setSessionData((prev) => {
+      const next = result.activeActivity;
+      const activities =
+        prev.adaptive && next && !prev.lesson.activities.some((a) => a.id === next.id)
+          ? [...prev.lesson.activities, next]
+          : prev.lesson.activities;
+      return {
+        ...prev,
+        lesson: { ...prev.lesson, activities },
+        adaptive: result.adaptive ?? prev.adaptive,
+        currentActivityIndex: result.nextActivityIndex,
+        activeActivity: result.activeActivity,
+        activeBranch: result.activeBranch,
+        completedActivities: prev.completedActivities.includes(answered.id)
+          ? prev.completedActivities
+          : [...prev.completedActivities, answered.id],
+        isCompleted: result.isCompleted,
+        sparksAwarded: (prev.sparksAwarded ?? 0) + result.sparksAwarded,
+      };
+    });
+  };
+
+  const handleContinue = () => {
+    if (!currentActivity || !pendingResult) return;
+    const result = pendingResult;
+    setPendingResult(null);
+    applyResult(currentActivity, result);
+  };
 
   const handleRespond = async (response: unknown) => {
     if (!currentActivity) return;
@@ -190,17 +224,16 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
         return;
       }
 
-      setSessionData((prev) => ({
-        ...prev,
-        currentActivityIndex: result.nextActivityIndex,
-        activeActivity: result.activeActivity,
-        activeBranch: result.activeBranch,
-        completedActivities: prev.completedActivities.includes(currentActivity.id)
-          ? prev.completedActivities
-          : [...prev.completedActivities, currentActivity.id],
-        isCompleted: result.isCompleted,
-        sparksAwarded: (prev.sparksAwarded ?? 0) + result.sparksAwarded,
-      }));
+      const isServerGradedCheck =
+        currentActivity.config.type === "independent_check" &&
+        currentActivity.config.serverGraded === true;
+
+      if (isServerGradedCheck && !isPreview) {
+        // Show the server's verdict first; the next activity follows on Continue.
+        setPendingResult(result);
+      } else {
+        applyResult(currentActivity, result);
+      }
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
@@ -255,10 +288,14 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
         {/* Step Progress Bar */}
         <div className="max-w-4xl mx-auto mt-4 pt-3 border-t border-line flex flex-col gap-2">
           <div className="flex items-center justify-between text-2xs font-extrabold text-muted">
-            <span>
-              ACTIVITY {Math.min(currentActivityIndex + 1, lesson.activities.length)} OF{" "}
-              {lesson.activities.length}
-            </span>
+            {adaptive ? (
+              <span data-testid="adaptive-step-label">STEP {adaptive.stepNumber}</span>
+            ) : (
+              <span>
+                ACTIVITY {Math.min(currentActivityIndex + 1, lesson.activities.length)} OF{" "}
+                {lesson.activities.length}
+              </span>
+            )}
             {sessionData.activeBranch ? (
               <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-900 font-black text-2xs uppercase">
                 Remediation: {sessionData.activeBranch.stage.replace("_", " ")}
@@ -381,6 +418,15 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
             isSubmitting={isSubmitting}
             onRespond={handleRespond}
             isFinalActivity={isFinalActivity}
+            serverResult={
+              pendingResult
+                ? {
+                    isCorrect: pendingResult.isCorrect === true,
+                    feedback: pendingResult.feedback ?? "",
+                  }
+                : null
+            }
+            onContinue={handleContinue}
           />
         ) : (
           <div className="p-8 bg-surface rounded-3xl border border-line text-center space-y-4">

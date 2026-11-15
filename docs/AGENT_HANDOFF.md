@@ -2,99 +2,107 @@
 
 ## Ownership and transfer status
 
-- Snapshot date: 2026-11-16, Asia/Kolkata.
-- Status: RELEASED BY GEM; Gyan authorized push to main remote repository.
-- Outgoing owner: Gem (completed next-step teaching engine).
-- Requested next owner: Clau, on Gyan's friend's device.
-- Observed source checkout: `/Users/gyan/Desktop/GAPS` on Gyan's Mac.
-- Observed branch: `main`.
-- Observed HEAD: `c3c630ed732d883c9608f541b4e9bc10a4bf1600` (prior to handoff commit).
-- Cached origin/main: `2b34a9788cd9587ea99e44de53c74b61ac1dc532`.
-- Push authorization: Gyan explicitly commanded "push this to the main repo".
-- Transfer checkpoint: all 7 milestones verified with all checks passing (308 unit tests, 38 e2e tests, db migrations & seed, typecheck, lint, format, content check, and build).
+- Updated: 2026-11-16, Asia/Kolkata.
+- Status: ACTIVE. Clau holds ownership and has stopped editing at a verified local
+  checkpoint. Not released: Gyan has not named a next owner.
+- Active owner: Clau, on Gyan's friend's device (alias `friend-mac`).
+- Previous owner: Gem, released at `e62b296561550d62a9f70f2ebdc8525b47040aae`.
+- Task branch: `codex/clau-teaching-engine`, created from `e62b296` (which equals
+  `origin/main` as fetched on 2026-11-16). `main` is untouched.
+- Synchronization: the branch exists ONLY in this local checkout. Nothing has been
+  pushed. Gem's earlier push of `main` is complete and is not a standing permission.
+- Authorization needed from Gyan before any push, merge to `main`, or deployment.
+- Checkout: `/Users/mdkaif/Downloads/GAPS-main`. It began as a source download without
+  Git history; it was attached to the repository with `git init` + `git fetch` +
+  `git reset --mixed e62b296`, which showed no differences from the handoff commit.
 
 ## Product direction
 
 Gaps dynamically combines explanation, exploration and practice for school maths
 and science, initially Class 6 demonstrations within a Class 6–8 product scope.
-Reusable activities, validated lesson configurations and the shared session
-lifecycle are the foundation. The server controls assessment and progression;
-models may suggest eligible teaching actions. Keep authored fallback paths.
-Participation, assisted answers and model output do not establish mastery.
-Appendix F in SPEC.md supersedes the original maths-only frontend scope.
+The server controls assessment and progression; engines (authored or model) may
+only choose eligible teaching actions. Participation, assisted answers, diagnostic
+probes and model output do not establish mastery. Appendix F in SPEC.md supersedes
+the original maths-only frontend scope.
 
-## Committed history missing from the cached remote
+## Acceptance questions: answers
 
-| Commit    | Delivered milestone (see build log for reported checks)       |
-| --------- | ------------------------------------------------------------- |
-| `80e5c35` | Student journeys and server-side assistance gating            |
-| `5a0a6b2` | Shared maths/science lesson format, player and demonstrations |
-| `169d392` | Authored remediation branches and refresh recovery            |
-| `1f74f47` | Cross-session assessment evidence and next action on return   |
-| `3f0ec23` | Planner preview and science independent-assessment journey    |
+1. **Did the teaching engine drive real sessions?** No. At `e62b296` it was used only
+   by the developer routes and comparison. It now drives persisted sessions for two
+   lessons: `lesson-maths-frac-part-adaptive` and `lesson-sci-circuits-adaptive`.
+2. **Did advancement respect the learner model?** No. The policy allowed `advance`
+   after two correct answers, below the belief reducer's rule, and reused one question
+   under new item ids. Now: two distinct unassisted correct answers only move the
+   learner on within the lesson; `advance` requires the belief reducer's
+   `demonstrated`/`retained` status. The reducer and its thresholds are unchanged.
 
-Latest additional commit: `c3c630e` — next-step teaching decision engine,
-server policy envelope, and visible comparison. It was created while the
-coordinator prepared this handoff, after the five milestones listed above.
+Details, assumptions and the tests that changed are in the latest build-log entry.
 
-The latest build-log entry reports 308 unit/integration tests and 38 browser tests
-passing. The coordinating assistant has not rerun those checks. Live model
-generation remains unverified by the coordinator; the established default is
-provider-disabled authored behavior. Current environment values were not read.
+## What changed (see `git diff e62b296..HEAD`)
 
-## Working-tree state at the latest inspection
+- `apps/web/server/teaching/`: `policy.ts` (reconciled rules, `teaching-rules-1.1`),
+  `item-bank.ts` (new), `sequencer.ts` (new), `adaptive-session.ts` (new),
+  `adaptive-lessons.ts` (new), `authored-engine.ts` (item bank, consolidation copy,
+  solvable fraction guided task), `compare.ts` (replays the real sequencer and reducer).
+- `apps/web/server/lesson/`: `service.ts` (dispatch to adaptive lessons, redaction of
+  fixed lessons, optional `misconceptionId`, next action resumes adaptive sessions),
+  `redact.ts` (new).
+- `apps/web/components/lesson/`: server-graded check flow, adaptive step label,
+  closing-step buttons. `apps/web/app/learn/page.tsx`: two entry buttons.
+  `apps/web/app/dev/lesson-planner/page.tsx`: evidence block per trace step.
+- `packages/contracts/src/lesson.ts`: optional fields only (no breaking change).
+- `packages/db/src/repos/student.ts`: `recordDecisionTrace`, `listDecisionTraces`.
+- Tests: `apps/web/server/adaptive-lesson.test.ts` (new), `teaching.test.ts`,
+  `apps/web/e2e/student-journey.spec.ts` (S19 updated, S20–S23 new).
+- No migration, no new route, no new dependency, no new environment variable.
 
-Gem's previously untracked teaching modules, API routes and test file are now
-included in `c3c630e`, along with lesson/player changes, browser tests and seed
-changes. No uncommitted application source remained at that inspection.
+## Verified on this device
 
-The only observed working-tree changes were the coordinator's four documents:
-`AGENTS.md`, `CLAUDE.md`, `docs/AGENT_WORKFLOW.md`, `docs/AGENT_HANDOFF.md`.
-Their formatting and local links were checked; no product tests were rerun for
-this documentation setup. Include them in the transfer checkpoint.
+Final code, local PostgreSQL 16.16, `LLM_PROVIDER=disabled`, `AI_ZDR_CONFIRMED=false`:
 
-Reinspect after Gem confirms it has stopped. Running processes and migration
-requirements have not been audited for this handoff.
+- `pnpm verify`: passed (typecheck, lint, format:check, content:check with 42
+  templates, db:migrate, db:seed, 330 unit/integration tests in 43 files, build,
+  46 browser tests = 23 scenarios on Desktop Chrome and Mobile Chrome).
+- Baseline at `e62b296` on this device before changes: passed (308 unit, 38 browser).
 
-## Acceptance questions for Clau
+Not verified: any live model. All behaviour above is authored. The fallback path was
+exercised with a failing engine, the disabled model engine and a hand-written rogue
+engine. Nothing was run against a deployed environment.
 
-Before expanding the engine, compare the completed code with the task below:
+## Open findings for Gyan
 
-1. The new build-log entry describes advancement after two distinct unassisted
-   correct responses. Reconcile that teaching policy with the existing formal
-   demonstration rule; distinguish moving within a lesson from advancing an
-   objective. Do not silently replace the canonical belief reducer's threshold.
-2. Confirm whether the engine drives real persisted student sessions or only the
-   synthetic developer comparison. Saved `activeActivity` alone does not prove
-   decision-engine integration. Finish any missing part of the requested journey.
+1. `/dev/lesson-planner` and `/api/v1/dev/*` have no authentication or environment
+   gate (existing at `e62b296`). They return authored activities including answers.
+2. The model engine is not enabled for real sessions: there is no per-student
+   `ai_free_text` scope / class-flag check to satisfy Non-negotiable 6.
+3. Learn shows both the fixed lessons and the step-by-step lessons. Making the
+   step-by-step lesson the default means rewriting Gem's S11–S17 journeys.
+4. Lesson content (fixed and item bank) has no review status, so Non-negotiable 10
+   is not enforced for lessons.
 
-These are handoff questions raised by the report, not independently verified bugs.
+## Local environment on this device (not transferred by Git)
 
-## Current task: next-step teaching engine
+- Toolchain helper: `source ~/.local/share/gaps-dev/env.sh` puts Node 22.23.5
+  (downloaded from nodejs.org, checksum verified), pnpm 10.34.9 (corepack) and the
+  PostgreSQL 16 client on PATH. The system Node is 24 and fails `engine-strict`.
+- Docker is not installed. `pnpm db:up` does not work here. PostgreSQL 16 was
+  installed with Homebrew (`postgresql@16`, not registered as a service) and runs
+  from its own data directory `~/.local/share/gaps-dev/pgdata`, user/database `gaps`.
+- **Process left running:** that PostgreSQL server, on `127.0.0.1:5432`.
+  Stop: `pg_ctl -D ~/.local/share/gaps-dev/pgdata stop`.
+  Start: `pg_ctl -D ~/.local/share/gaps-dev/pgdata -l ~/.local/share/gaps-dev/pg.log -o "-p 5432 -c listen_addresses=127.0.0.1" start`.
+- `.env` was created from `.env.example` with a generated `SESSION_SECRET`. Variable
+  names in use: `DATABASE_URL`, `SESSION_SECRET`, `APP_BASE_URL`, `LLM_PROVIDER`,
+  `AI_ZDR_CONFIRMED`, `FEATURE_SOLVE_WITH_ME`, `CONTENT_SERVE_DRAFTS`, `SEED_DEMO`.
+- No server is left on port 3100 or 3000.
 
-Continue the existing implementation; avoid rebuilding it from scratch.
+## Next concrete actions
 
-- Choose eligible teaching actions from objective/prerequisite state, assessed
-  responses, assistance history and already delivered activities.
-- Use one decision interface for authored and gated LLM implementations.
-- Deliver different sequences for struggling and independently succeeding
-  learners on the SAME objective, in both fractions and circuits.
-- Use diagnostic questions when an incorrect answer is ambiguous.
-- Persist accepted activities and versions before showing them; refresh/retries
-  reuse the activity, responses are idempotent, assistance provenance survives.
-- Bound remediation and offer save-and-pause. Keep the existing player and
-  deterministic simulations/verifiers.
-- Validate configurations and fall back to authored content for the same
-  objective. Keep live-provider development on synthetic learners under the
-  existing controls; distinguish tested facts from unchecked explanatory prose.
-- Expose decision evidence in a developer trace outside student-facing UI.
-- Verify the learner journeys, recovery, authorization and provider failures.
-  Report authored behavior separately from actual live-model verification.
-
-## Immediate next actions
-
-1. Gem confirmed it has completed editing, passing all commit gates and verification tests.
-2. Commit coordination documents (`AGENTS.md`, `CLAUDE.md`, `docs/AGENT_HANDOFF.md`, `docs/AGENT_WORKFLOW.md`, `docs/BUILD_LOG.md`).
-3. Push `main` to `origin` (`https://github.com/geek-warrior21/GAPS.git`) under Gyan's explicit directive.
-4. Clau fetches the latest `main` on the friend's device and confirms the transferred commit hash.
-5. Clau establishes the local baseline, resolves the acceptance questions above, and continues product development.
+1. Gyan: review the branch and decide on push/merge authorization and the four
+   findings above.
+2. If a push is authorized: publish `codex/clau-teaching-engine` without force, have
+   the other device fetch it and confirm the commit hash before any merge to `main`.
+   Without push permission, transfer it as a Git bundle (see AGENT_WORKFLOW.md).
+3. Next engineering steps, in order: gate the developer routes; add the per-student
+   AI consent gate and only then allow the model engine in sessions, verified on
+   synthetic learners; add item banks for `MATH-FRAC-EQUIV` and `SCI-ELEC-CONDUCTORS`.

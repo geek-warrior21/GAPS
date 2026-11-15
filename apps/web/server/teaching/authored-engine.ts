@@ -6,6 +6,7 @@ import type {
 } from "@gaps/contracts";
 import type { TeachingDecisionEngine } from "./types";
 import { TeachingPolicyEngine } from "./policy";
+import { buildCheckActivity, selectAssessmentItem, selectDiagnosticItem } from "./item-bank";
 
 /**
  * Deterministic, authored implementation of TeachingDecisionEngine.
@@ -20,14 +21,18 @@ export class AuthoredTeachingDecisionEngine implements TeachingDecisionEngine {
     const evidence = policyResult.evidence;
     const assessmentTarget = policyResult.assessmentTarget;
 
-    const activity = this.buildActivityForAction(
-      action,
-      input.objectiveId,
-      evidence.inferredMisconception,
-      evidence.isAmbiguous,
-      evidence.remediationCycle,
-      input.previouslyDeliveredActivities.length + 1,
-    );
+    const stepNum = input.previouslyDeliveredActivities.length + 1;
+    const activity =
+      this.buildBankActivity(input, action, evidence.isAmbiguous, stepNum) ??
+      this.buildActivityForAction(
+        action,
+        input.objectiveId,
+        evidence.inferredMisconception,
+        evidence.isAmbiguous,
+        evidence.remediationCycle,
+        stepNum,
+        evidence.lessonStage === "consolidating",
+      );
 
     return {
       action,
@@ -41,6 +46,24 @@ export class AuthoredTeachingDecisionEngine implements TeachingDecisionEngine {
     };
   }
 
+  /**
+   * Assessed questions come from the authored item bank, which holds genuinely
+   * distinct items across two templates. Returns undefined when the objective
+   * has no bank or no unused item, and the inline authored content is used.
+   */
+  private buildBankActivity(
+    input: TeachingDecisionInput,
+    action: TeachingAction,
+    isDiagnostic: boolean,
+    stepNum: number,
+  ): LessonActivity | undefined {
+    if (action !== "independent_check") return undefined;
+    const item = isDiagnostic
+      ? selectDiagnosticItem(input.objectiveId)
+      : selectAssessmentItem(input.objectiveId, input.excludedItemIds ?? []);
+    return item ? buildCheckActivity(item, stepNum) : undefined;
+  }
+
   private buildActivityForAction(
     action: TeachingAction,
     objectiveId: string,
@@ -48,6 +71,7 @@ export class AuthoredTeachingDecisionEngine implements TeachingDecisionEngine {
     isAmbiguous: boolean,
     remediationCycle: number,
     stepNum: number,
+    isConsolidation = false,
   ): LessonActivity {
     const isMaths = objectiveId === "MATH-FRAC-PART" || objectiveId === "MATH-FRAC-EQUIV";
 
@@ -56,6 +80,31 @@ export class AuthoredTeachingDecisionEngine implements TeachingDecisionEngine {
       // 1. PAUSE (Bounded Remediation / Stopping Point)
       // =======================================================================
       case "pause": {
+        if (isConsolidation) {
+          return {
+            id: `act_pause_step_${stepNum}`,
+            type: "stopping_point",
+            title: "Good Work Today: Let's Stop Here",
+            instructions: "You have worked through today's questions. Your progress is saved.",
+            config: {
+              type: "stopping_point",
+              headline: "That's Today's Practice Done",
+              body: isMaths
+                ? "You have tried every question for today on parts of a whole. A few ideas are still settling, and that is fine. Next time there will be fresh questions to show what you know."
+                : "You have tried every question for today on simple circuits. A few ideas are still settling, and that is fine. Next time there will be fresh questions to show what you know.",
+              recommendation: "Come back later for a fresh set of questions on this topic.",
+              keyTakeaways: isMaths
+                ? [
+                    "The bottom number counts all the equal parts in the whole",
+                    "The top number counts the parts that are chosen or shaded",
+                  ]
+                : [
+                    "A bulb glows only in a complete, unbroken loop",
+                    "Any gap in the loop stops the current",
+                  ],
+            },
+          };
+        }
         return {
           id: `act_pause_step_${stepNum}`,
           type: "stopping_point",
@@ -345,8 +394,9 @@ export class AuthoredTeachingDecisionEngine implements TeachingDecisionEngine {
                 instruction: "Shade 3 parts out of 4.",
               },
               targetCriteria: {
-                property: "shadedParts",
-                expectedValue: "3",
+                // The lesson player reports a fraction strip as "shaded/parts".
+                property: "fraction",
+                expectedValue: "3/4",
               },
               successFeedback: "Outstanding! You created 3 shaded parts in a 4-part whole (3/4).",
               retryFeedback: "Not yet! Make sure exactly 3 parts are shaded.",
