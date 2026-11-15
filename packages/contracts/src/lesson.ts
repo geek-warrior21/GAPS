@@ -326,3 +326,128 @@ export const LessonPlanGenerateResponseSchema = z.object({
   }),
 });
 export type LessonPlanGenerateResponse = z.infer<typeof LessonPlanGenerateResponseSchema>;
+
+// ============================================================================
+// Teaching Decision Engine: Adaptive Next-Step Schemas
+// ============================================================================
+
+export const LessonTeachingActionSchema = z.enum([
+  "explain",
+  "demonstrate",
+  "explore",
+  "guided_practice",
+  "independent_check",
+  "revisit_prerequisite",
+  "advance",
+  "pause",
+]);
+export type LessonTeachingAction = z.infer<typeof LessonTeachingActionSchema>;
+
+export const TeachingAssessedResponseSchema = z.object({
+  activityId: z.string(),
+  conceptId: z.string(),
+  submittedAnswer: z.string(),
+  isCorrect: z.boolean(),
+  assistanceLevel: z.number().int().min(0).max(2),
+  misconceptionDetected: z.string().nullable().optional(),
+  ambiguousError: z.boolean().default(false),
+  timestamp: z.string(),
+});
+export type TeachingAssessedResponse = z.infer<typeof TeachingAssessedResponseSchema>;
+
+export const DeliveredActivityRecordSchema = z.object({
+  id: z.string(),
+  type: LessonActivityTypeSchema,
+  title: z.string(),
+  action: LessonTeachingActionSchema,
+  timestamp: z.string(),
+});
+export type DeliveredActivityRecord = z.infer<typeof DeliveredActivityRecordSchema>;
+
+export const TeachingDecisionEvidenceSchema = z.object({
+  rationale: z.string(),
+  inferredMisconception: z.string().nullable().optional(),
+  isAmbiguous: z.boolean().default(false),
+  consecutiveSuccesses: z.number().int().nonnegative(),
+  remediationCycle: z.number().int().nonnegative(),
+  eligibleActions: z.array(LessonTeachingActionSchema),
+});
+export type TeachingDecisionEvidence = z.infer<typeof TeachingDecisionEvidenceSchema>;
+
+export const TeachingDecisionInputSchema = z.object({
+  objectiveId: z.string(),
+  prerequisites: z.array(z.string()).default([]),
+  recentAssessedResponses: z.array(TeachingAssessedResponseSchema).default([]),
+  assistanceHistory: z.record(z.string(), z.string()).default({}),
+  previouslyDeliveredActivities: z.array(DeliveredActivityRecordSchema).default([]),
+  sourceMaterial: z.record(z.string(), z.unknown()).optional(),
+  availableActivityTypes: z
+    .array(LessonActivityTypeSchema)
+    .default([
+      "intro",
+      "interactive_manipulation",
+      "predict_and_observe",
+      "guided_practice",
+      "independent_check",
+      "stopping_point",
+    ]),
+  remediationCycleCount: z.number().int().nonnegative().default(0),
+  subject: SubjectIdSchema.default("maths"),
+  level: z.number().int().default(6),
+});
+export type TeachingDecisionInput = z.infer<typeof TeachingDecisionInputSchema>;
+
+export const TeachingDecisionOutputSchema = z.object({
+  action: LessonTeachingActionSchema,
+  activity: LessonActivitySchema,
+  evidence: TeachingDecisionEvidenceSchema,
+  assessmentTarget: z.string(),
+  audit: z
+    .object({
+      source: z.enum(["authored", "llm_suggested", "fallback"]),
+      model: z.string().optional(),
+      latencyMs: z.number().optional(),
+      validationOutcome: LessonPlanValidationOutcomeSchema.optional(),
+      fallbackReason: z.string().optional(),
+      unverifiedExplanatoryProse: z.boolean().default(false),
+    })
+    .optional(),
+});
+export type TeachingDecisionOutput = z.infer<typeof TeachingDecisionOutputSchema>;
+
+export const TeachingDecisionTraceEntrySchema = z.object({
+  stepIndex: z.number().int().nonnegative(),
+  action: LessonTeachingActionSchema,
+  activityId: z.string(),
+  activityTitle: z.string(),
+  activityType: LessonActivityTypeSchema,
+  activity: LessonActivitySchema.optional(),
+  rationale: z.string(),
+  assessmentTarget: z.string(),
+  inferredMisconception: z.string().nullable().optional(),
+  isAmbiguous: z.boolean().optional(),
+  eligibleActions: z.array(LessonTeachingActionSchema),
+  source: z.enum(["authored", "llm_suggested", "fallback"]),
+  timestamp: z.string(),
+});
+export type TeachingDecisionTraceEntry = z.infer<typeof TeachingDecisionTraceEntrySchema>;
+
+export const TeachingEngineTraceResponseSchema = z.object({
+  objectiveId: z.string(),
+  subject: SubjectIdSchema,
+  traces: z.object({
+    struggling: z.object({
+      learnerProfile: SyntheticLearnerProfileSchema,
+      decisions: z.array(TeachingDecisionTraceEntrySchema),
+      finalStatus: z.string(),
+      masteryDemonstrated: z.boolean(),
+    }),
+    succeeding: z.object({
+      learnerProfile: SyntheticLearnerProfileSchema,
+      decisions: z.array(TeachingDecisionTraceEntrySchema),
+      finalStatus: z.string(),
+      masteryDemonstrated: z.boolean(),
+    }),
+  }),
+});
+export type TeachingEngineTraceResponse = z.infer<typeof TeachingEngineTraceResponseSchema>;

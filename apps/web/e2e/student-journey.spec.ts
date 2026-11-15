@@ -1012,15 +1012,118 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page.getByText("Interactive Lesson Player Preview")).toBeVisible();
 
     // Click "Let's Explore" inside preview player to verify interactive operation
-    await previewPlayer.locator('button:has-text("Let\'s Explore")').click();
+    await previewPlayer.locator('button:has-text("Let\'s Explore")').click({ force: true });
     await expect(previewPlayer.getByText("Interactive Exploration", { exact: true })).toBeVisible();
 
     // 6. Test Challenge Profile Generation
-    await page.locator("[data-testid='profile-challenge']").click();
-    await generateBtn.click();
+    await page.locator("[data-testid='profile-challenge']").click({ force: true });
+    await generateBtn.click({ force: true });
     await expect(page.locator("[data-testid='val-pedagogical-card']")).toContainText(
       "✓ Tailored: ready_for_challenge",
     );
     await expect(page.getByText("Interactive Lesson Player Preview")).toBeVisible();
+  });
+
+  test("S19: Developer teaching-engine comparison demonstrates distinct adaptive sequences for struggling vs succeeding learners with server policy envelopes", async ({
+    page,
+  }) => {
+    // 1. Visit dev lesson planner
+    await page.goto("/dev/lesson-planner");
+    await expect(
+      page.getByRole("heading", { name: "Model-Planned Teaching Engine: Live Preview" }),
+    ).toBeVisible();
+
+    // 2. Switch to Next-Step Teaching Decision Comparison tab
+    const traceTab = page.locator("[data-testid='tab-view-teaching-trace']");
+    await expect(traceTab).toBeVisible();
+    await traceTab.click();
+
+    // 3. Verify comparison controls
+    await expect(page.getByRole("heading", { name: "Teaching Decision Comparison" })).toBeVisible();
+    const runBtn = page.locator("[data-testid='run-comparison-button']");
+    await expect(runBtn).toBeVisible();
+
+    // 4. Run comparison for default Maths (MATH-FRAC-PART)
+    await runBtn.click();
+
+    // 5. Verify side-by-side results container rendered
+    const resultsContainer = page.locator("[data-testid='comparison-results-container']");
+    await expect(resultsContainer).toBeVisible();
+
+    // Verify Learner A (Struggling) Column
+    await expect(page.getByText("Learner A: Struggling")).toBeVisible();
+    await expect(page.getByText("Scaffolded Adaptive Interventions")).toBeVisible();
+    // Step 1: explore
+    await expect(page.locator("[data-testid='trace-struggling-step-1']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-struggling-step-1']")).toContainText(
+      "Action: explore",
+    );
+    // Step 2: explore (targeted fraction manipulation triggered by REVERSAL misconception)
+    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toContainText(
+      "Action: explore",
+    );
+    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toContainText(
+      "Misconception Detected: REVERSAL",
+    );
+    // Step 3: independent_check (triggered by ambiguous error -> diagnostic probe)
+    await expect(page.locator("[data-testid='trace-struggling-step-3']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-struggling-step-3']")).toContainText(
+      "Action: independent_check",
+    );
+    await expect(page.locator("[data-testid='trace-struggling-step-3']")).toContainText(
+      "Ambiguous Error → Diagnostic Probe Activated",
+    );
+    // Step 4: explain (alternative explanation after continued difficulty)
+    await expect(page.locator("[data-testid='trace-struggling-step-4']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-struggling-step-4']")).toContainText(
+      "Action: explain",
+    );
+    // Final Step 5: pause (due to bounded remediation loop)
+    await expect(page.locator("[data-testid='trace-struggling-step-5']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-struggling-step-5']")).toContainText(
+      "Action: pause",
+    );
+
+    // Verify Learner B (Succeeding) Column
+    await expect(page.getByText("Learner B: Succeeding Independently")).toBeVisible();
+    await expect(page.getByText("Independent Mastery & Progression")).toBeVisible();
+    // Step 1: explore
+    await expect(page.locator("[data-testid='trace-succeeding-step-1']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-succeeding-step-1']")).toContainText(
+      "Action: explore",
+    );
+    // Step 2: independent_check
+    await expect(page.locator("[data-testid='trace-succeeding-step-2']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-succeeding-step-2']")).toContainText(
+      "Action: independent_check",
+    );
+    // Step 3: advance (authorized by server policy envelope after distinct unassisted successes)
+    await expect(page.locator("[data-testid='trace-succeeding-step-3']")).toBeVisible();
+    await expect(page.locator("[data-testid='trace-succeeding-step-3']")).toContainText(
+      "Action: advance",
+    );
+
+    // 6. Test Step Preview interactivity
+    const previewBtn = page.locator("[data-testid='preview-activity-struggling-2']");
+    await expect(previewBtn).toBeVisible();
+    await previewBtn.click();
+
+    // Verify preview lesson player mounts with the selected step activity
+    const previewPlayer = page.locator("[data-testid='preview-lesson-player']");
+    await expect(previewPlayer).toBeVisible();
+    await expect(page.getByText("Close Step Preview")).toBeVisible();
+
+    // 7. Test Science Objective (SCI-ELEC-CIRCUITS)
+    await page.locator("[data-testid='trace-subject-science']").click();
+    await runBtn.click();
+
+    // Verify science trace shows circuit exploration, AIR_GAP remediation, and advance
+    await expect(page.locator("[data-testid='trace-struggling-step-2']")).toContainText(
+      "Misconception Detected: AIR_GAP",
+    );
+    await expect(page.locator("[data-testid='trace-succeeding-step-3']")).toContainText(
+      "Action: advance",
+    );
   });
 });

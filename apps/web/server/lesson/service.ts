@@ -369,7 +369,9 @@ export async function startOrResumeLessonSession(
     const finalLesson =
       sessionPlan && sessionPlan.lessonId === lesson.lessonId ? sessionPlan : lesson;
 
-    const activeActivity = resolveActiveActivity(finalLesson, currentActivityIndex, activeBranch);
+    const activeActivity =
+      (counters.activeActivity as LessonActivity | undefined) ??
+      resolveActiveActivity(finalLesson, currentActivityIndex, activeBranch);
 
     return {
       session: {
@@ -562,6 +564,7 @@ export async function submitLessonActivityResponse(
           counters: {
             ...counters,
             activeBranch: nextBranch,
+            activeActivity: remediation.followUpCheck,
             activityResponses,
             updatedAt: new Date().toISOString(),
           },
@@ -685,6 +688,7 @@ export async function submitLessonActivityResponse(
               counters: {
                 ...counters,
                 activeBranch: null,
+                activeActivity: lessonPlan.activities[nextActivityIndex],
                 assistanceStatus,
                 branchDecisions,
                 currentActivityIndex: nextActivityIndex,
@@ -699,6 +703,7 @@ export async function submitLessonActivityResponse(
               counters: {
                 ...counters,
                 activeBranch: null,
+                activeActivity: lessonPlan.activities[nextActivityIndex],
                 assistanceStatus,
                 branchDecisions,
                 currentActivityIndex: nextActivityIndex,
@@ -742,6 +747,7 @@ export async function submitLessonActivityResponse(
             counters: {
               ...counters,
               activeBranch: stoppingBranch,
+              activeActivity: remediation.stoppingPoint,
               assistanceStatus,
               branchDecisions,
               activityResponses,
@@ -844,6 +850,7 @@ export async function submitLessonActivityResponse(
             counters: {
               ...counters,
               activeBranch: null,
+              activeActivity: lessonPlan.activities[nextActivityIndex],
               assistanceStatus,
               branchDecisions,
               currentActivityIndex: nextActivityIndex,
@@ -858,6 +865,7 @@ export async function submitLessonActivityResponse(
             counters: {
               ...counters,
               activeBranch: null,
+              activeActivity: lessonPlan.activities[nextActivityIndex],
               assistanceStatus,
               branchDecisions,
               currentActivityIndex: nextActivityIndex,
@@ -1072,6 +1080,7 @@ export async function submitLessonActivityResponse(
       counters: {
         ...counters,
         activeBranch: newActiveBranch,
+        activeActivity: currentActivity.remediation.remediationActivity,
         assistanceStatus,
         branchDecisions,
         activityResponses,
@@ -1116,6 +1125,7 @@ export async function submitLessonActivityResponse(
       counters: {
         ...counters,
         activeBranch: null,
+        activeActivity: lessonPlan.activities[nextActivityIndex],
         assistanceStatus,
         branchDecisions,
         currentActivityIndex: nextActivityIndex,
@@ -1130,6 +1140,7 @@ export async function submitLessonActivityResponse(
       counters: {
         ...counters,
         activeBranch: null,
+        activeActivity: lessonPlan.activities[nextActivityIndex],
         assistanceStatus,
         branchDecisions,
         currentActivityIndex: nextActivityIndex,

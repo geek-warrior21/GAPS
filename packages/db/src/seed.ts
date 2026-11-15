@@ -1,11 +1,12 @@
 import { pathToFileURL } from "node:url";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { closeSqlClients, getDb, type DbClient } from "./client";
 import { syncContent } from "./content-sync";
 import { hashPassword, hashPin } from "./crypto";
 import { loadRootEnv } from "./env";
 import {
   attempts,
+  bossBattles,
   cohorts,
   conceptBeliefs,
   consentRecords,
@@ -96,6 +97,24 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
   await db.delete(learningSessions).where(inArray(learningSessions.studentId, nonSeedStudentIds));
   await db.delete(sparksLedger).where(inArray(sparksLedger.studentId, nonSeedStudentIds));
   await db.delete(events).where(inArray(events.studentId, nonSeedStudentIds));
+
+  // Also clean non-seed sessions, attempts and extra beliefs for Meera
+  const meeraSeedSessionId = "ses_01J00000000000000000000001";
+  await db
+    .delete(attempts)
+    .where(and(eq(attempts.studentId, meeraId), ne(attempts.sessionId, meeraSeedSessionId)));
+  await db.delete(bossBattles).where(eq(bossBattles.studentId, meeraId));
+  await db.delete(quests).where(eq(quests.studentId, meeraId));
+  await db
+    .delete(learningSessions)
+    .where(
+      and(eq(learningSessions.studentId, meeraId), ne(learningSessions.id, meeraSeedSessionId)),
+    );
+  await db
+    .delete(conceptBeliefs)
+    .where(
+      and(eq(conceptBeliefs.studentId, meeraId), ne(conceptBeliefs.conceptId, "MATH-FRAC-EQUIV")),
+    );
 
   // Teacher
   await db

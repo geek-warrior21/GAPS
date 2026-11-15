@@ -964,3 +964,72 @@ Implement an evidence-driven adaptive loop through the shared lesson engine for 
 - **LLM Provider Isolation:** The project remains in `LLM_PROVIDER=disabled` mode by default. The preview planner safely executes in fallback mode using curated high-fidelity profile fixtures matching the exact versioned lesson schema.
 - **Student Data Isolation:** The developer preview generates transient plans that execute entirely in-memory and do not create rows in `learning_sessions`, `attempts`, or `concept_beliefs`.
 - **Factual Validation Scope:** The factual validator enforces domain-specific simulation invariants (e.g., maximum initial partition count $\le 12$, shaded parts $\le$ total parts, valid switch and conductor states). Additional complex mathematical domain verification will expand as new activity types are introduced.
+
+---
+
+## 2026-11-16 — Next-Step Adaptive Teaching Engine, Server Policy Envelope, and Visible Comparison
+
+### 1. Built
+
+1. **Shared Teaching Decision Interface & Schema (`packages/contracts`, `apps/web/server/teaching/types.ts`):**
+   - Defined `LessonTeachingActionSchema` with supported actions: `explain`, `demonstrate`, `explore`, `guided_practice`, `independent_check`, `revisit_prerequisite`, `advance`, `pause`.
+   - Defined `TeachingDecisionInputSchema` accepting: current objective, prerequisites, recent assessed responses with assistance levels and error metadata, previously delivered activities, curated reviewed source material, available activity types, and remediation cycle counts.
+   - Defined `TeachingDecisionOutputSchema` delivering: next teaching action, validated `LessonActivity` configuration, `TeachingDecisionEvidence` (rationale, eligible actions, inferred misconception, ambiguity flag), next assessment target, and audit telemetry.
+   - Defined `TeachingDecisionTraceEntrySchema` and `TeachingEngineTraceResponseSchema` for developer comparisons.
+
+2. **Policy Separation from Model Suggestions (`TeachingPolicyEngine` in `apps/web/server/teaching/policy.ts`):**
+   - Server-Authoritative Envelope: Server determines eligible actions and transition prerequisites; model/authored engines can only select and configure activities within those strict bounds.
+   - Mastery Gating: Strict invariant that models cannot declare mastery or trigger progression; `advance` is eligible *only* when the student has demonstrated $\ge 2$ consecutive distinct correct unassisted items on the objective.
+   - Ambiguous vs Definite Misconceptions: Implemented `evaluateErrorMisconception`. Definite misconceptions (`REVERSAL`, `WHOLE_PART_CONFUSION`, `AIR_GAP`, `CURRENT_CONSUMPTION`) trigger targeted interventions; ambiguous or unclassified errors trigger diagnostic probes (`independent_check` with targeted diagnostic choices). Definite misconceptions are never inferred from ambiguous errors.
+   - Bounded Remediation: Policy tracks remediation cycles. If a student encounters repeated difficulty ($\ge 2$ remediation cycles), the server policy forces `eligibleActions = ["pause"]` with a genuine save-and-pause stopping point and takeaway summary.
+
+3. **Authored Deterministic Decision Engine (`AuthoredTeachingDecisionEngine` in `apps/web/server/teaching/authored-engine.ts`):**
+   - Fully deterministic implementation of `TeachingDecisionEngine` requiring zero external network or AI provider calls.
+   - Supports Class 6 Fractions (`MATH-FRAC-PART`) and Circuits (`SCI-ELEC-CIRCUITS`).
+   - Implements targeted interventions:
+     - Numerator/denominator confusion (`REVERSAL`) -> targeted fraction manipulation lab.
+     - Continued confusion -> alternative explanation ("Denominator Down Rule") or simpler visual tasks.
+     - Open switch air gap misconception (`AIR_GAP`) -> targeted circuit experiment contrasting open switches against conductors.
+     - Ambiguous errors -> 2-choice diagnostic check.
+     - Bounded difficulty -> pause activity with key takeaways and reassuring "not yet" student copy.
+
+4. **Model Teaching Decision Engine & AI Gateway (`LlmTeachingDecisionEngine` in `apps/web/server/teaching/llm-engine.ts`):**
+   - AI Gateway Integration: Adheres strictly to `isAiRuntimeEnabled()`, PII scrubbing via `scrubPii`, and zero student PII sent to LLM.
+   - Verification Pipeline: Verifies model output against Zod schema, checks that chosen action is strictly within server-allowed `eligibleActions`, and runs factual simulation parameter bounds (`validateActivityFactualRules`).
+   - Tags output with `unverifiedExplanatoryProse: true` to prevent unreviewed model prose from masquerading as verified content.
+   - Deterministic Fallback: Automatically falls back to `AuthoredTeachingDecisionEngine` for the *same* objective on any provider failure, timeout, schema violation, or disabled provider setting.
+
+5. **Session Durability & Refresh Recovery (`apps/web/server/lesson/service.ts`):**
+   - Enhanced lesson session state persistence: saves `counters.activeActivity` at every branch transition and activity completion in `learning_sessions.counters`.
+   - On refresh, resume, or reconnect, `startOrResumeLessonSession` reads `activeActivity` from persisted session state, preventing activity re-generation or premature advancement.
+   - Preserves assistance provenance across reload and grading.
+
+6. **Visible Comparison Trace UI (`/dev/lesson-planner`):**
+   - Built a developer-only side-by-side comparison dashboard outside the student interface (`tab-view-teaching-trace`):
+     - Compares two synthetic learners through the **same starting objective**:
+       - Learner A (Struggling): Initial Exploration → Misconception Error (`REVERSAL`/`AIR_GAP`) → Targeted Manipulation Lab → Ambiguous Error → Diagnostic Probe Check → Continued Difficulty → Alternative Explanation → Bounded Remediation Pause.
+       - Learner B (Succeeding): Initial Exploration → Unassisted Check 1 (Correct) → Distinct Unassisted Check 2 (Correct) → Server-Authorized Advance.
+     - Displays server envelope badges, rationale, misconception tags, diagnostic badges, and interactive "Preview Activity" buttons mounting each step in the sandboxed preview player.
+
+7. **Automated Testing & E2E Acceptance:**
+   - Added unit test suite `apps/web/server/teaching.test.ts` (16 passing tests):
+     - Tests policy bounds, mastery gating, ambiguous error handling, bounded remediation loop capping at pause, authored paths for fractions & circuits, LLM validation & fallback, and synthetic comparison traces.
+   - Added Playwright Scenario S19 in `apps/web/e2e/student-journey.spec.ts`:
+     - Verifies side-by-side teaching trace comparison in `/dev/lesson-planner`, tab navigation, server envelope enforcement, misconception detection, ambiguous diagnostic probe activation, pause boundary, and live step activity preview.
+
+### 2. Verification Results
+
+- **`pnpm typecheck`:** All 6 workspace packages passed cleanly (0 errors).
+- **`pnpm lint`:** 0 errors, 0 warnings across all packages.
+- **`pnpm format:check`:** All files match Prettier code style.
+- **`pnpm content:check`:** 42 templates verified across 500 seeds each (all acyclic, $\ge 20$ distinct items).
+- **`pnpm db:migrate && pnpm db:seed`:** Database migrations and seeded demo cohort applied idempotently.
+- **`pnpm test` (`vitest`):** 42 test files, 308 tests passed (100% pass rate).
+- **`pnpm test:e2e` (`playwright`):** 19 scenarios, 38 tests passed across Desktop Chrome and Mobile Chrome.
+- **`pnpm verify`:** All commit gates passed cleanly end-to-end.
+
+### 3. Assumptions & Limitations
+
+- **Authoritative Server Envelope:** The LLM is restricted to selecting and configuring activities within the server's pre-computed `eligibleActions`. It cannot declare mastery or modify learner beliefs.
+- **Fallback Policy:** With `LLM_PROVIDER=disabled` (the project default), the system runs completely deterministically using `AuthoredTeachingDecisionEngine`, providing full curriculum coverage for fractions and circuits without external dependencies.
+- **Explanatory Prose Tagging:** Model-generated explanations are explicitly marked with `unverifiedExplanatoryProse: true` so the client UI and audit logs differentiate between deterministically verified simulation rules and unvetted generative prose.

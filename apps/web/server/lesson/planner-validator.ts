@@ -3,11 +3,146 @@ import {
   LessonPlanSchema,
   type LessonPlanValidationOutcome,
   type SyntheticLearnerProfile,
+  type LessonActivity,
 } from "@gaps/contracts";
 
 export interface ValidationDetails {
   outcome: LessonPlanValidationOutcome;
   validatedPlan?: LessonPlan;
+}
+
+export function validateActivityFactualRules(act: LessonActivity): string[] {
+  const issues: string[] = [];
+
+  // Validate Simulation Parameters
+  if (act.type === "interactive_manipulation") {
+    const cfg = act.config as { simulation?: { simulationKind: string; [key: string]: unknown } };
+    if (!cfg.simulation) {
+      issues.push(
+        `Factual Error in activity "${act.id}": interactive_manipulation must define a valid simulation.`,
+      );
+    } else if (cfg.simulation.simulationKind === "fraction_strip") {
+      const parts = Number(cfg.simulation.initialParts);
+      const shaded = Number(cfg.simulation.initialShaded);
+      const minP = Number(cfg.simulation.minParts ?? 1);
+      const maxP = Number(cfg.simulation.maxParts ?? 12);
+
+      if (parts < 1 || parts > 12) {
+        issues.push(
+          `Factual Error in activity "${act.id}": fraction_strip initialParts must be between 1 and 12 (got ${parts}).`,
+        );
+      }
+      if (shaded < 0 || shaded > parts) {
+        issues.push(
+          `Factual Error in activity "${act.id}": fraction_strip initialShaded (${shaded}) cannot exceed parts (${parts}).`,
+        );
+      }
+      if (parts < minP || parts > maxP) {
+        issues.push(
+          `Factual Error in activity "${act.id}": initialParts (${parts}) outside allowed range [${minP}, ${maxP}].`,
+        );
+      }
+    } else if (cfg.simulation.simulationKind === "circuit_loop") {
+      const sw = cfg.simulation.initialSwitchState;
+      const obj = cfg.simulation.conductiveObject;
+      if (sw !== "open" && sw !== "closed") {
+        issues.push(
+          `Factual Error in activity "${act.id}": circuit initialSwitchState must be "open" or "closed" (got "${String(sw)}").`,
+        );
+      }
+      if (obj !== "none" && obj !== "copper_key" && obj !== "rubber_eraser") {
+        issues.push(
+          `Factual Error in activity "${act.id}": circuit conductiveObject must be "none", "copper_key", or "rubber_eraser" (got "${String(obj)}").`,
+        );
+      }
+    }
+  }
+
+  // Validate Predict and Observe Configuration
+  if (act.type === "predict_and_observe") {
+    const cfg = act.config as {
+      predictionChoices?: Array<{ id: string; text: string; isExpected?: boolean }>;
+      observationReveal?: { expectedObservation: string; explanation: string };
+    };
+
+    if (!cfg.predictionChoices || cfg.predictionChoices.length < 2) {
+      issues.push(
+        `Factual Error in activity "${act.id}": predict_and_observe must provide at least 2 prediction choices.`,
+      );
+    } else {
+      const expectedCount = cfg.predictionChoices.filter((c) => c.isExpected).length;
+      if (expectedCount !== 1) {
+        issues.push(
+          `Factual Error in activity "${act.id}": predict_and_observe must have exactly 1 choice with isExpected=true (found ${expectedCount}).`,
+        );
+      }
+    }
+
+    if (!cfg.observationReveal?.expectedObservation || !cfg.observationReveal?.explanation) {
+      issues.push(
+        `Factual Error in activity "${act.id}": predict_and_observe must supply both expectedObservation and explanation.`,
+      );
+    }
+  }
+
+  // Validate Guided Practice Configuration
+  if (act.type === "guided_practice") {
+    const cfg = act.config as {
+      targetCriteria?: { property: string; expectedValue: string };
+      successFeedback?: string;
+      retryFeedback?: string;
+    };
+    if (!cfg.targetCriteria?.property || !cfg.targetCriteria?.expectedValue) {
+      issues.push(
+        `Factual Error in activity "${act.id}": guided_practice must define valid targetCriteria property and expectedValue.`,
+      );
+    }
+    if (!cfg.successFeedback || !cfg.retryFeedback) {
+      issues.push(
+        `Factual Error in activity "${act.id}": guided_practice must define both successFeedback and retryFeedback.`,
+      );
+    }
+  }
+
+  // Validate Independent Check Configuration
+  if (act.type === "independent_check") {
+    const cfg = act.config as {
+      prompt?: string;
+      questionType?: string;
+      choices?: Array<{ id: string; text: string }>;
+      correctAnswer?: string;
+      explanation?: string;
+    };
+
+    if (!cfg.prompt || cfg.prompt.trim().length === 0) {
+      issues.push(
+        `Factual Error in activity "${act.id}": independent_check must have a non-empty prompt.`,
+      );
+    }
+
+    if (cfg.questionType === "choice") {
+      if (!cfg.choices || cfg.choices.length < 2) {
+        issues.push(
+          `Factual Error in activity "${act.id}": choice-based check must have at least 2 choices.`,
+        );
+      } else {
+        const choiceIds = new Set(cfg.choices.map((c) => c.id));
+        if (!cfg.correctAnswer || !choiceIds.has(cfg.correctAnswer)) {
+          issues.push(
+            `Factual Error in activity "${act.id}": correctAnswer "${cfg.correctAnswer}" does not match any choice ID in [${Array.from(choiceIds).join(", ")}].`,
+          );
+        }
+      }
+    }
+
+    if (!cfg.explanation || cfg.explanation.trim().length < 10) {
+      issues.push(
+        `Factual Error in activity "${act.id}": independent_check must include a substantive explanation.`,
+      );
+    }
+  }
+
+  return issues;
 }
 
 export function validateLessonPlan(
@@ -59,133 +194,8 @@ export function validateLessonPlan(
     }
     activityIds.add(act.id);
 
-    // Validate Simulation Parameters
-    if (act.type === "interactive_manipulation") {
-      const cfg = act.config as { simulation?: { simulationKind: string; [key: string]: unknown } };
-      if (!cfg.simulation) {
-        issues.push(
-          `Factual Error in activity "${act.id}": interactive_manipulation must define a valid simulation.`,
-        );
-      } else if (cfg.simulation.simulationKind === "fraction_strip") {
-        const parts = Number(cfg.simulation.initialParts);
-        const shaded = Number(cfg.simulation.initialShaded);
-        const minP = Number(cfg.simulation.minParts ?? 1);
-        const maxP = Number(cfg.simulation.maxParts ?? 12);
-
-        if (parts < 1 || parts > 12) {
-          issues.push(
-            `Factual Error in activity "${act.id}": fraction_strip initialParts must be between 1 and 12 (got ${parts}).`,
-          );
-        }
-        if (shaded < 0 || shaded > parts) {
-          issues.push(
-            `Factual Error in activity "${act.id}": fraction_strip initialShaded (${shaded}) cannot exceed parts (${parts}).`,
-          );
-        }
-        if (parts < minP || parts > maxP) {
-          issues.push(
-            `Factual Error in activity "${act.id}": initialParts (${parts}) outside allowed range [${minP}, ${maxP}].`,
-          );
-        }
-      } else if (cfg.simulation.simulationKind === "circuit_loop") {
-        const sw = cfg.simulation.initialSwitchState;
-        const obj = cfg.simulation.conductiveObject;
-        if (sw !== "open" && sw !== "closed") {
-          issues.push(
-            `Factual Error in activity "${act.id}": circuit initialSwitchState must be "open" or "closed" (got "${String(sw)}").`,
-          );
-        }
-        if (obj !== "none" && obj !== "copper_key" && obj !== "rubber_eraser") {
-          issues.push(
-            `Factual Error in activity "${act.id}": circuit conductiveObject must be "none", "copper_key", or "rubber_eraser" (got "${String(obj)}").`,
-          );
-        }
-      }
-    }
-
-    // Validate Predict and Observe Configuration
-    if (act.type === "predict_and_observe") {
-      const cfg = act.config as {
-        predictionChoices?: Array<{ id: string; text: string; isExpected?: boolean }>;
-        observationReveal?: { expectedObservation: string; explanation: string };
-      };
-
-      if (!cfg.predictionChoices || cfg.predictionChoices.length < 2) {
-        issues.push(
-          `Factual Error in activity "${act.id}": predict_and_observe must provide at least 2 prediction choices.`,
-        );
-      } else {
-        const expectedCount = cfg.predictionChoices.filter((c) => c.isExpected).length;
-        if (expectedCount !== 1) {
-          issues.push(
-            `Factual Error in activity "${act.id}": predict_and_observe must have exactly 1 choice with isExpected=true (found ${expectedCount}).`,
-          );
-        }
-      }
-
-      if (!cfg.observationReveal?.expectedObservation || !cfg.observationReveal?.explanation) {
-        issues.push(
-          `Factual Error in activity "${act.id}": predict_and_observe must supply both expectedObservation and explanation.`,
-        );
-      }
-    }
-
-    // Validate Guided Practice Configuration
-    if (act.type === "guided_practice") {
-      const cfg = act.config as {
-        targetCriteria?: { property: string; expectedValue: string };
-        successFeedback?: string;
-        retryFeedback?: string;
-      };
-      if (!cfg.targetCriteria?.property || !cfg.targetCriteria?.expectedValue) {
-        issues.push(
-          `Factual Error in activity "${act.id}": guided_practice must define valid targetCriteria property and expectedValue.`,
-        );
-      }
-      if (!cfg.successFeedback || !cfg.retryFeedback) {
-        issues.push(
-          `Factual Error in activity "${act.id}": guided_practice must define both successFeedback and retryFeedback.`,
-        );
-      }
-    }
-
-    // Validate Independent Check Configuration
-    if (act.type === "independent_check") {
-      const cfg = act.config as {
-        prompt?: string;
-        questionType?: string;
-        choices?: Array<{ id: string; text: string }>;
-        correctAnswer?: string;
-        explanation?: string;
-      };
-
-      if (!cfg.prompt || cfg.prompt.trim().length === 0) {
-        issues.push(
-          `Factual Error in activity "${act.id}": independent_check must have a non-empty prompt.`,
-        );
-      }
-
-      if (cfg.questionType === "choice") {
-        if (!cfg.choices || cfg.choices.length < 2) {
-          issues.push(
-            `Factual Error in activity "${act.id}": choice-based check must have at least 2 choices.`,
-          );
-        } else {
-          const choiceIds = new Set(cfg.choices.map((c) => c.id));
-          if (!cfg.correctAnswer || !choiceIds.has(cfg.correctAnswer)) {
-            issues.push(
-              `Factual Error in activity "${act.id}": correctAnswer "${cfg.correctAnswer}" does not match any choice ID in [${Array.from(choiceIds).join(", ")}].`,
-            );
-          }
-        }
-      }
-
-      if (!cfg.explanation || cfg.explanation.trim().length < 10) {
-        issues.push(
-          `Factual Error in activity "${act.id}": independent_check must include a substantive explanation.`,
-        );
-      }
-    }
+    const actIssues = validateActivityFactualRules(act);
+    issues.push(...actIssues);
   }
 
   // Objective Match Check
