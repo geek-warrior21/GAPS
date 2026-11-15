@@ -1,6 +1,6 @@
 import type { CurriculumTopic, LessonPlan } from "@gaps/contracts";
 import { MATHS_FRAC_PART_LESSON } from "./maths-frac-part";
-import { SCI_CIRCUITS_LESSON } from "./sci-circuits";
+import { SCI_CIRCUITS_LESSON, SCI_CIRCUITS_MASTERY_LESSON } from "./sci-circuits";
 import { SCI_CONDUCTORS_LESSON } from "./sci-conductors";
 
 export const CURRICULUM_TOPICS: readonly CurriculumTopic[] = [
@@ -58,6 +58,7 @@ export const CURRICULUM_TOPICS: readonly CurriculumTopic[] = [
 export const LESSON_REGISTRY: Record<string, LessonPlan> = {
   [MATHS_FRAC_PART_LESSON.lessonId]: MATHS_FRAC_PART_LESSON,
   [SCI_CIRCUITS_LESSON.lessonId]: SCI_CIRCUITS_LESSON,
+  [SCI_CIRCUITS_MASTERY_LESSON.lessonId]: SCI_CIRCUITS_MASTERY_LESSON,
   [SCI_CONDUCTORS_LESSON.lessonId]: SCI_CONDUCTORS_LESSON,
 };
 

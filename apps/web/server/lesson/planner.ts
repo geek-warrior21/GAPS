@@ -1,4 +1,9 @@
-import { type LessonPlan, LessonPlanSchema } from "@gaps/contracts";
+import {
+  type LessonPlan,
+  LessonPlanSchema,
+  type LessonPlanGenerateResponse,
+  type SyntheticLearnerProfile,
+} from "@gaps/contracts";
 import {
   getDefaultLessonForTopic,
   getLessonById,
@@ -7,17 +12,32 @@ import {
 } from "@gaps/content";
 import { getLlmProvider, isAiRuntimeEnabled } from "@gaps/ai";
 import { log } from "../log";
+import {
+  OBJECTIVE_SOURCE_PACKS,
+  buildPlannerPrompt,
+  type ObjectiveSourcePack,
+} from "./planner-source-pack";
+import { validateLessonPlan } from "./planner-validator";
+import {
+  FIXTURE_MATHS_CHALLENGE,
+  FIXTURE_MATHS_STRUGGLING_REV,
+  FIXTURE_SCIENCE_CHALLENGE,
+  FIXTURE_SCIENCE_STRUGGLING_AIRGAP,
+} from "./planner-fixtures";
 
 export interface LessonPlanningContext {
   subject: "maths" | "science";
   topicId: string;
   level: number;
+  objectiveId?: string;
+  learnerProfile?: SyntheticLearnerProfile;
   studentId?: string;
   lessonId?: string;
 }
 
 export interface LessonPlanner {
   planLesson(context: LessonPlanningContext): Promise<LessonPlan>;
+  planLessonWithDetails?(context: LessonPlanningContext): Promise<LessonPlanGenerateResponse>;
 }
 
 export class AuthoredLessonPlanner implements LessonPlanner {
@@ -43,69 +63,300 @@ export class AuthoredLessonPlanner implements LessonPlanner {
     }
     return MATHS_FRAC_PART_LESSON;
   }
+
+  async planLessonWithDetails(context: LessonPlanningContext): Promise<LessonPlanGenerateResponse> {
+    const t0 = performance.now();
+    const plan = await this.planLesson(context);
+    const latencyMs = Math.round(performance.now() - t0);
+
+    const validation = validateLessonPlan(
+      plan,
+      context.objectiveId ?? plan.topicId,
+      context.learnerProfile,
+    );
+
+    return {
+      plan,
+      isFallback: true,
+      fallbackReason: "AUTHORED_CURRICULUM_BASELINE",
+      metadata: {
+        model: "authored-curriculum-v1",
+        version: "1.0",
+        latencyMs,
+        validation: validation.outcome,
+        learnerProfileUsed: {
+          profileType: context.learnerProfile?.profileType ?? "new_learner",
+          namedMisconception: context.learnerProfile?.namedMisconception,
+        },
+      },
+    };
+  }
 }
 
 export class LlmLessonPlanner implements LessonPlanner {
   constructor(private readonly fallbackPlanner: LessonPlanner = new AuthoredLessonPlanner()) {}
 
   async planLesson(context: LessonPlanningContext): Promise<LessonPlan> {
-    // If AI runtime is disabled or provider is disabled, immediately use authored fallback
+    const res = await this.planLessonWithDetails(context);
+    return res.plan;
+  }
+
+  async planLessonWithDetails(context: LessonPlanningContext): Promise<LessonPlanGenerateResponse> {
+    const t0 = performance.now();
+    const effectiveObjectiveId =
+      context.objectiveId ??
+      (context.subject === "science" ? "SCI-ELEC-CIRCUITS" : "MATH-FRAC-PART");
+
+    const sourcePack: ObjectiveSourcePack =
+      OBJECTIVE_SOURCE_PACKS[effectiveObjectiveId] ??
+      (context.subject === "science"
+        ? OBJECTIVE_SOURCE_PACKS["SCI-ELEC-CIRCUITS"]!
+        : OBJECTIVE_SOURCE_PACKS["MATH-FRAC-PART"]!);
+
+    const learnerProfile: SyntheticLearnerProfile = context.learnerProfile ?? {
+      profileType: "new_learner",
+      priorMastery: "not_started",
+    };
+
+    // If AI runtime is disabled or provider is disabled, use fallback with audit
     if (!isAiRuntimeEnabled()) {
-      return this.fallbackPlanner.planLesson(context);
+      const fallbackPlan = await this.getProfileAwareFallbackPlan(
+        context,
+        effectiveObjectiveId,
+        learnerProfile,
+      );
+      const latencyMs = Math.round(performance.now() - t0);
+      const validation = validateLessonPlan(fallbackPlan, effectiveObjectiveId, learnerProfile);
+
+      return {
+        plan: fallbackPlan,
+        isFallback: true,
+        fallbackReason: "LLM_PROVIDER_DISABLED",
+        metadata: {
+          model: "authored-fallback-v1",
+          version: "1.0",
+          latencyMs,
+          validation: validation.outcome,
+          learnerProfileUsed: {
+            profileType: learnerProfile.profileType,
+            namedMisconception: learnerProfile.namedMisconception,
+          },
+        },
+      };
     }
 
     try {
       const provider = getLlmProvider();
       if (!provider || provider.name === "disabled") {
-        return this.fallbackPlanner.planLesson(context);
+        const fallbackPlan = await this.getProfileAwareFallbackPlan(
+          context,
+          effectiveObjectiveId,
+          learnerProfile,
+        );
+        const latencyMs = Math.round(performance.now() - t0);
+        const validation = validateLessonPlan(fallbackPlan, effectiveObjectiveId, learnerProfile);
+
+        return {
+          plan: fallbackPlan,
+          isFallback: true,
+          fallbackReason: "LLM_PROVIDER_DISABLED",
+          metadata: {
+            model: "authored-fallback-v1",
+            version: "1.0",
+            latencyMs,
+            validation: validation.outcome,
+            learnerProfileUsed: {
+              profileType: learnerProfile.profileType,
+              namedMisconception: learnerProfile.namedMisconception,
+            },
+          },
+        };
       }
 
-      const prompt = `You are a curriculum designer for Class 6-8 students.
-Generate a structured, interactive lesson plan for:
-Subject: ${context.subject}
-Level: Class ${context.level}
-Topic ID: ${context.topicId}
+      // If Mock provider: serve high-fidelity synthetic profile fixtures
+      if (provider.name === "mock") {
+        const fixturePlan = this.selectMockFixture(effectiveObjectiveId, learnerProfile);
+        const latencyMs = Math.round(performance.now() - t0);
+        const validation = validateLessonPlan(fixturePlan, effectiveObjectiveId, learnerProfile);
 
-The lesson plan MUST adhere strictly to the JSON schema:
-- version: "1.0"
-- at least 2 activities
-- activities can include: intro, interactive_manipulation, predict_and_observe, guided_practice, independent_check.
-`;
+        return {
+          plan: fixturePlan,
+          isFallback: false,
+          metadata: {
+            model: "mock-curriculum-planner-v1",
+            version: "1.0",
+            latencyMs,
+            validation: validation.outcome,
+            learnerProfileUsed: {
+              profileType: learnerProfile.profileType,
+              namedMisconception: learnerProfile.namedMisconception,
+            },
+          },
+        };
+      }
+
+      // Live LLM Provider (e.g. OpenAI)
+      const prompt = buildPlannerPrompt({
+        sourcePack,
+        learnerProfile,
+      });
 
       const result = await provider.generate<LessonPlan>({
         purpose: "tutor",
-        system: "You generate version 1.0 JSON lesson plans for middle school students.",
+        system:
+          "You are an expert middle school curriculum designer. Output strictly valid JSON conforming to the version 1.0 LessonPlan schema.",
         input: prompt,
         schema: LessonPlanSchema,
-        maxOutputTokens: 2000,
-        timeoutMs: 10000,
+        maxOutputTokens: 2500,
+        timeoutMs: 12000,
       });
+
+      const latencyMs = Math.round(performance.now() - t0);
 
       if (!result.ok || !result.value) {
         log.warn("lesson.planner.llm_generation_failed", {
           reason: !result.ok ? result.reason : "unknown",
         });
-        return this.fallbackPlanner.planLesson(context);
+        const fallbackPlan = await this.getProfileAwareFallbackPlan(
+          context,
+          effectiveObjectiveId,
+          learnerProfile,
+        );
+        const validation = validateLessonPlan(fallbackPlan, effectiveObjectiveId, learnerProfile);
+
+        return {
+          plan: fallbackPlan,
+          isFallback: true,
+          fallbackReason: `LLM_GENERATION_FAILED_${!result.ok ? result.reason.toUpperCase() : "UNKNOWN"}`,
+          metadata: {
+            model: "gpt-4o-mini-fallback",
+            version: "1.0",
+            latencyMs,
+            validation: validation.outcome,
+            learnerProfileUsed: {
+              profileType: learnerProfile.profileType,
+              namedMisconception: learnerProfile.namedMisconception,
+            },
+          },
+        };
       }
 
-      // Strictly validate with Zod
-      const validated = LessonPlanSchema.safeParse(result.value);
-      if (!validated.success) {
-        log.warn("lesson.planner.llm_validation_failed", { errors: validated.error.issues });
-        return this.fallbackPlanner.planLesson(context);
+      // Multi-Stage Semantic & Factual Validation
+      const validation = validateLessonPlan(result.value, effectiveObjectiveId, learnerProfile);
+
+      if (validation.outcome.status !== "passed" || !validation.validatedPlan) {
+        log.warn("lesson.planner.factual_validation_failed", {
+          issues: validation.outcome.issues,
+        });
+
+        const fallbackPlan = await this.getProfileAwareFallbackPlan(
+          context,
+          effectiveObjectiveId,
+          learnerProfile,
+        );
+        return {
+          plan: fallbackPlan,
+          isFallback: true,
+          fallbackReason: `VALIDATION_FAILED: ${validation.outcome.issues[0] ?? "Semantic criteria not met"}`,
+          metadata: {
+            model: "gpt-4o-mini",
+            version: "1.0",
+            latencyMs,
+            validation: validation.outcome,
+            learnerProfileUsed: {
+              profileType: learnerProfile.profileType,
+              namedMisconception: learnerProfile.namedMisconception,
+            },
+          },
+        };
       }
 
-      return validated.data;
+      return {
+        plan: validation.validatedPlan,
+        isFallback: false,
+        metadata: {
+          model: "gpt-4o-mini",
+          version: "1.0",
+          latencyMs,
+          validation: validation.outcome,
+          learnerProfileUsed: {
+            profileType: learnerProfile.profileType,
+            namedMisconception: learnerProfile.namedMisconception,
+          },
+        },
+      };
     } catch (err) {
       log.error("lesson.planner.llm_exception", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return this.fallbackPlanner.planLesson(context);
+
+      const latencyMs = Math.round(performance.now() - t0);
+      const fallbackPlan = await this.getProfileAwareFallbackPlan(
+        context,
+        effectiveObjectiveId,
+        learnerProfile,
+      );
+      const validation = validateLessonPlan(fallbackPlan, effectiveObjectiveId, learnerProfile);
+
+      return {
+        plan: fallbackPlan,
+        isFallback: true,
+        fallbackReason: `EXCEPTION: ${err instanceof Error ? err.message : "Unknown error"}`,
+        metadata: {
+          model: "authored-fallback-v1",
+          version: "1.0",
+          latencyMs,
+          validation: validation.outcome,
+          learnerProfileUsed: {
+            profileType: learnerProfile.profileType,
+            namedMisconception: learnerProfile.namedMisconception,
+          },
+        },
+      };
     }
+  }
+
+  private selectMockFixture(
+    objectiveId: string,
+    learnerProfile: SyntheticLearnerProfile,
+  ): LessonPlan {
+    if (objectiveId === "MATH-FRAC-PART") {
+      if (learnerProfile.profileType === "struggling") {
+        return FIXTURE_MATHS_STRUGGLING_REV;
+      }
+      if (learnerProfile.profileType === "ready_for_challenge") {
+        return FIXTURE_MATHS_CHALLENGE;
+      }
+      return MATHS_FRAC_PART_LESSON;
+    }
+
+    if (objectiveId === "SCI-ELEC-CIRCUITS") {
+      if (learnerProfile.profileType === "struggling") {
+        return FIXTURE_SCIENCE_STRUGGLING_AIRGAP;
+      }
+      if (learnerProfile.profileType === "ready_for_challenge") {
+        return FIXTURE_SCIENCE_CHALLENGE;
+      }
+      return SCI_CIRCUITS_LESSON;
+    }
+
+    return MATHS_FRAC_PART_LESSON;
+  }
+
+  private async getProfileAwareFallbackPlan(
+    context: LessonPlanningContext,
+    objectiveId: string,
+    learnerProfile: SyntheticLearnerProfile,
+  ): Promise<LessonPlan> {
+    // If a profile-specific fixture exists, use it even in fallback mode for developer preview richness
+    if (learnerProfile.profileType !== "new_learner") {
+      return this.selectMockFixture(objectiveId, learnerProfile);
+    }
+    return this.fallbackPlanner.planLesson(context);
   }
 }
 
-let activePlanner: LessonPlanner = new AuthoredLessonPlanner();
+let activePlanner: LessonPlanner = new LlmLessonPlanner();
 
 export function setLessonPlanner(planner: LessonPlanner): void {
   activePlanner = planner;

@@ -3,14 +3,149 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { LessonSessionResponse, LessonRespondResponse } from "@gaps/contracts";
+import type {
+  LessonSessionResponse,
+  LessonRespondResponse,
+  LessonPlan,
+  LessonActivity,
+} from "@gaps/contracts";
 import { LessonActivityRenderer } from "./LessonActivityRenderer";
 
 interface LessonPlayerProps {
   initialData: LessonSessionResponse;
+  isPreview?: boolean;
 }
 
-export function LessonPlayer({ initialData }: LessonPlayerProps) {
+function evaluatePreviewActivityResponse(
+  lesson: LessonPlan,
+  sessionData: LessonSessionResponse,
+  currentActivity: LessonActivity,
+  response: unknown,
+): LessonRespondResponse {
+  const currentIdx = sessionData.currentActivityIndex;
+
+  if (sessionData.activeBranch) {
+    const parentActivity = lesson.activities.find(
+      (a) => a.id === sessionData.activeBranch?.parentActivityId,
+    );
+    const remediation = parentActivity?.remediation;
+
+    if (sessionData.activeBranch.stage === "remediation_activity") {
+      return {
+        activityId: currentActivity.id,
+        accepted: true,
+        feedback: "Remediation exploration completed!",
+        activeBranch: { ...sessionData.activeBranch, stage: "followup_check" },
+        activeActivity: remediation?.followUpCheck,
+        nextActivityIndex: currentIdx,
+        isCompleted: false,
+        sparksAwarded: 0,
+      };
+    }
+
+    if (sessionData.activeBranch.stage === "followup_check") {
+      const cfg = currentActivity.config as {
+        correctAnswer: string;
+        choices?: Array<{ id: string }>;
+      };
+      const answer =
+        typeof response === "object" && response !== null && "choiceId" in response
+          ? (response as { choiceId: string }).choiceId
+          : String(response);
+      const isCorrect = answer === cfg.correctAnswer;
+
+      if (isCorrect) {
+        const nextIdx = currentIdx + 1 >= lesson.activities.length ? currentIdx : currentIdx + 1;
+        const isFinal = currentIdx + 1 >= lesson.activities.length;
+        return {
+          activityId: currentActivity.id,
+          accepted: true,
+          isCorrect: true,
+          feedback: "Correct! Advancing to main practice.",
+          activeBranch: null,
+          activeActivity: lesson.activities[nextIdx],
+          nextActivityIndex: nextIdx,
+          isCompleted: isFinal,
+          sparksAwarded: 0,
+        };
+      }
+
+      return {
+        activityId: currentActivity.id,
+        accepted: true,
+        isCorrect: false,
+        feedback: "Let's review the key idea together.",
+        activeBranch: { ...sessionData.activeBranch, stage: "stopping_point" },
+        activeActivity: remediation?.stoppingPoint,
+        nextActivityIndex: currentIdx,
+        isCompleted: false,
+        sparksAwarded: 0,
+      };
+    }
+
+    if (sessionData.activeBranch.stage === "stopping_point") {
+      const nextIdx = currentIdx + 1 >= lesson.activities.length ? currentIdx : currentIdx + 1;
+      const isFinal = currentIdx + 1 >= lesson.activities.length;
+      return {
+        activityId: currentActivity.id,
+        accepted: true,
+        feedback: "Continuing lesson with scaffolded support.",
+        activeBranch: null,
+        activeActivity: lesson.activities[nextIdx],
+        nextActivityIndex: nextIdx,
+        isCompleted: isFinal,
+        sparksAwarded: 0,
+      };
+    }
+  }
+
+  // Linear activities
+  if (currentActivity.type === "predict_and_observe") {
+    const cfg = currentActivity.config as {
+      predictionChoices: Array<{ id: string; isExpected?: boolean }>;
+    };
+    const choiceId =
+      typeof response === "object" && response !== null && "choiceId" in response
+        ? (response as { choiceId: string }).choiceId
+        : String(response);
+    const selected = cfg.predictionChoices.find((c) => c.id === choiceId);
+    const isCorrect = Boolean(selected?.isExpected);
+
+    if (!isCorrect && currentActivity.remediation) {
+      return {
+        activityId: currentActivity.id,
+        accepted: true,
+        isCorrect: false,
+        feedback: currentActivity.remediation.targetedExplanation,
+        activeBranch: {
+          parentActivityId: currentActivity.id,
+          stage: "remediation_activity",
+          attemptsCount: 1,
+        },
+        activeActivity: currentActivity.remediation.remediationActivity,
+        nextActivityIndex: currentIdx,
+        isCompleted: false,
+        sparksAwarded: 0,
+      };
+    }
+  }
+
+  const nextIdx = currentIdx + 1 >= lesson.activities.length ? currentIdx : currentIdx + 1;
+  const isFinal = currentIdx + 1 >= lesson.activities.length;
+
+  return {
+    activityId: currentActivity.id,
+    accepted: true,
+    isCorrect: true,
+    nextActivityIndex: nextIdx,
+    activeBranch: null,
+    activeActivity: lesson.activities[nextIdx],
+    isCompleted: isFinal,
+    sparksAwarded: isFinal ? 15 : 0,
+  };
+}
+
+export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerProps) {
   const router = useRouter();
   const [sessionData, setSessionData] = useState<LessonSessionResponse>(initialData);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,21 +162,28 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
     setErrorMessage(null);
 
     try {
-      const res = await fetch(`/api/v1/lessons/${lesson.lessonId}/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          activityId: currentActivity.id,
-          response,
-        }),
-      });
+      let result: LessonRespondResponse;
 
-      if (!res.ok) {
-        const errorJson = await res.json().catch(() => ({}));
-        throw new Error(errorJson.error?.message || "Failed to submit activity response");
+      if (isPreview) {
+        // Deterministic in-memory preview evaluation (no database writes, fully isolated)
+        result = evaluatePreviewActivityResponse(lesson, sessionData, currentActivity, response);
+      } else {
+        const res = await fetch(`/api/v1/lessons/${lesson.lessonId}/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            activityId: currentActivity.id,
+            response,
+          }),
+        });
+
+        if (!res.ok) {
+          const errorJson = await res.json().catch(() => ({}));
+          throw new Error(errorJson.error?.message || "Failed to submit activity response");
+        }
+
+        result = await res.json();
       }
-
-      const result: LessonRespondResponse = await res.json();
 
       if (result.isSavedAndExited) {
         router.push("/learn");

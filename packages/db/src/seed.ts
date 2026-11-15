@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { inArray } from "drizzle-orm";
 import { closeSqlClients, getDb, type DbClient } from "./client";
 import { syncContent } from "./content-sync";
 import { hashPassword, hashPin } from "./crypto";
@@ -83,8 +84,18 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
   const kabirId = "stu_01J00000000000000000000002";
   const aaravId = "stu_01J00000000000000000000003";
   const ananyaId = "stu_01J00000000000000000000004";
+  const rohanId = "stu_01J00000000000000000000005";
+  const priyaId = "stu_01J00000000000000000000006";
   const teacherId = "usr_01J00000000000000000000001";
   const adminId = "usr_01J00000000000000000000002";
+
+  // Clean non-seed test evidence for deterministic repeatability
+  const nonSeedStudentIds = [kabirId, aaravId, ananyaId, rohanId, priyaId];
+  await db.delete(conceptBeliefs).where(inArray(conceptBeliefs.studentId, nonSeedStudentIds));
+  await db.delete(attempts).where(inArray(attempts.studentId, nonSeedStudentIds));
+  await db.delete(learningSessions).where(inArray(learningSessions.studentId, nonSeedStudentIds));
+  await db.delete(sparksLedger).where(inArray(sparksLedger.studentId, nonSeedStudentIds));
+  await db.delete(events).where(inArray(events.studentId, nonSeedStudentIds));
 
   // Teacher
   await db
@@ -241,6 +252,56 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
       },
     });
 
+  // Rohan (Desktop E2E Science Learner)
+  await db
+    .insert(users)
+    .values({
+      id: rohanId,
+      role: "student",
+      orgId,
+      cohortId,
+      displayName: "Rohan",
+      username: "rohan",
+      pinHash: hashPin("777777"),
+      status: "active",
+      avatar: { color: "purple", icon: "rocket" },
+      settings: {},
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        displayName: "Rohan",
+        username: "rohan",
+        pinHash: hashPin("777777"),
+        status: "active",
+      },
+    });
+
+  // Priya (Mobile E2E Science Learner)
+  await db
+    .insert(users)
+    .values({
+      id: priyaId,
+      role: "student",
+      orgId,
+      cohortId,
+      displayName: "Priya",
+      username: "priya",
+      pinHash: hashPin("888888"),
+      status: "active",
+      avatar: { color: "teal", icon: "spark" },
+      settings: {},
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        displayName: "Priya",
+        username: "priya",
+        pinHash: hashPin("888888"),
+        status: "active",
+      },
+    });
+
   // 5. Consent Records
   const consentMeeraId = "con_01J00000000000000000000001";
   await db
@@ -279,6 +340,34 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
       scope: "core_learning",
       method: "school_paper",
       evidenceRef: "CONSENT-PAPER-ANANYA-2026",
+      recordedBy: teacherId,
+      grantedAt: new Date("2026-10-01T09:00:00.000Z"),
+    })
+    .onConflictDoNothing();
+
+  const consentRohanId = "con_01J00000000000000000000004";
+  await db
+    .insert(consentRecords)
+    .values({
+      id: consentRohanId,
+      studentId: rohanId,
+      scope: "core_learning",
+      method: "school_paper",
+      evidenceRef: "CONSENT-PAPER-ROHAN-2026",
+      recordedBy: teacherId,
+      grantedAt: new Date("2026-10-01T09:00:00.000Z"),
+    })
+    .onConflictDoNothing();
+
+  const consentPriyaId = "con_01J00000000000000000000005";
+  await db
+    .insert(consentRecords)
+    .values({
+      id: consentPriyaId,
+      studentId: priyaId,
+      scope: "core_learning",
+      method: "school_paper",
+      evidenceRef: "CONSENT-PAPER-PRIYA-2026",
       recordedBy: teacherId,
       grantedAt: new Date("2026-10-01T09:00:00.000Z"),
     })
@@ -351,6 +440,44 @@ export async function seedDatabase(db: DbClient = getDb()): Promise<SeedResult> 
       sparksTotal: 0,
     })
     .onConflictDoNothing();
+
+  await db
+    .insert(studentState)
+    .values({
+      studentId: rohanId,
+      stateVersion: 1,
+      focusConceptId: "MATH-FRAC-PART",
+      startConceptId: "MATH-FRAC-PART",
+      quickCheckDoneAt: new Date("2026-11-13T09:30:00.000Z"),
+      sparksTotal: 10,
+    })
+    .onConflictDoUpdate({
+      target: studentState.studentId,
+      set: {
+        focusConceptId: "MATH-FRAC-PART",
+        startConceptId: "MATH-FRAC-PART",
+        sparksTotal: 10,
+      },
+    });
+
+  await db
+    .insert(studentState)
+    .values({
+      studentId: priyaId,
+      stateVersion: 1,
+      focusConceptId: "MATH-FRAC-PART",
+      startConceptId: "MATH-FRAC-PART",
+      quickCheckDoneAt: new Date("2026-11-13T09:30:00.000Z"),
+      sparksTotal: 10,
+    })
+    .onConflictDoUpdate({
+      target: studentState.studentId,
+      set: {
+        focusConceptId: "MATH-FRAC-PART",
+        startConceptId: "MATH-FRAC-PART",
+        sparksTotal: 10,
+      },
+    });
 
   // 7. Seeded Session, Item Instances, Attempts, Events for Meera
   // Meera demonstrated MATH-FRAC-EQUIV 8 days ago

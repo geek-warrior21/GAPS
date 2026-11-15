@@ -157,34 +157,45 @@ export default function LearnPage() {
             </p>
           </div>
 
-          {/* Subject Switcher */}
-          <div className="flex items-center gap-1.5 p-1 bg-surface rounded-2xl border border-line shadow-2xs self-start sm:self-auto">
-            <button
-              type="button"
-              data-testid="tab-subject-maths"
-              onClick={() => setSelectedSubject("maths")}
-              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 ${
-                selectedSubject === "maths"
-                  ? "bg-primary text-white shadow-xs"
-                  : "text-muted hover:text-ink"
-              }`}
+          {/* Subject Switcher & Dev Planner Link */}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <Link
+              href="/dev/lesson-planner"
+              data-testid="link-dev-planner"
+              className="px-3 py-2 rounded-xl border border-dashed border-purple-500/40 text-purple-700 bg-purple-500/10 hover:bg-purple-500/20 text-2xs font-extrabold transition-colors flex items-center gap-1.5"
             >
-              <span>📐</span>
-              <span>Mathematics</span>
-            </button>
-            <button
-              type="button"
-              data-testid="tab-subject-science"
-              onClick={() => setSelectedSubject("science")}
-              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 ${
-                selectedSubject === "science"
-                  ? "bg-primary text-white shadow-xs"
-                  : "text-muted hover:text-ink"
-              }`}
-            >
-              <span>⚡</span>
-              <span>Science</span>
-            </button>
+              <span>🛠️</span>
+              <span>Dev Planner</span>
+            </Link>
+
+            <div className="flex items-center gap-1.5 p-1 bg-surface rounded-2xl border border-line shadow-2xs">
+              <button
+                type="button"
+                data-testid="tab-subject-maths"
+                onClick={() => setSelectedSubject("maths")}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 ${
+                  selectedSubject === "maths"
+                    ? "bg-primary text-white shadow-xs"
+                    : "text-muted hover:text-ink"
+                }`}
+              >
+                <span>📐</span>
+                <span>Mathematics</span>
+              </button>
+              <button
+                type="button"
+                data-testid="tab-subject-science"
+                onClick={() => setSelectedSubject("science")}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 ${
+                  selectedSubject === "science"
+                    ? "bg-primary text-white shadow-xs"
+                    : "text-muted hover:text-ink"
+                }`}
+              >
+                <span>⚡</span>
+                <span>Science</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -428,7 +439,15 @@ export default function LearnPage() {
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end">
+              <div className="pt-2 flex flex-wrap items-center justify-end gap-3">
+                <Link
+                  href="/lesson/lesson-sci-circuits-mastery"
+                  data-testid="start-circuits-mastery-button"
+                  className="px-5 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-xs sm:text-sm font-bold shadow-2xs transition-colors flex items-center gap-2"
+                >
+                  <span>Take Mastery Assessment</span>
+                  <span>✍️</span>
+                </Link>
                 <Link
                   href="/lesson/lesson-sci-circuits-1"
                   data-testid="start-circuits-lesson-button"

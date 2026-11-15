@@ -195,6 +195,8 @@ export const SCI_CIRCUITS_LESSON: LessonPlan = {
       config: {
         type: "independent_check",
         conceptId: "SCI-ELEC-CIRCUITS",
+        templateId: "tpl_sci_circuits_continuity",
+        itemInstanceId: "itm_sci_circuits_continuity_1",
         prompt:
           "Which of the following conditions is required for an electric bulb in a circuit to glow?",
         questionType: "choice",
@@ -219,6 +221,109 @@ export const SCI_CIRCUITS_LESSON: LessonPlan = {
         correctAnswer: "choice_a",
         explanation:
           "Electric current requires an unbroken, complete conducting path from one terminal of the battery through the bulb to the other terminal.",
+      },
+    },
+  ],
+};
+
+export const SCI_CIRCUITS_MASTERY_LESSON: LessonPlan = {
+  lessonId: "lesson-sci-circuits-mastery",
+  version: "1.0",
+  subject: "science",
+  level: 6,
+  topicId: "sci-elec-circuits",
+  title: "Electric Circuits: Mastery Assessment",
+  description:
+    "Prove your understanding of circuit loops, air gaps, and component continuity across independent challenges.",
+  learningObjectives: [
+    "Analyze why an open switch prevents current flow",
+    "Identify circuit faults and broken loops",
+    "Demonstrate independent mastery of electric circuits",
+  ],
+  activities: [
+    {
+      id: "act_mastery_intro",
+      type: "intro",
+      title: "Mastery Challenge: Electric Circuits",
+      instructions:
+        "Review the circuit principles and tackle two independent verification challenges.",
+      config: {
+        type: "intro",
+        headline: "Circuit Mastery Check",
+        body: "You have explored how electric charges flow in unbroken loops. Now, demonstrate your independent understanding across two distinct challenges: analyzing air gaps in open switches and diagnosing disconnected circuit wires.",
+        hookQuestion: "Can you spot why charges stop flowing in complex scenarios?",
+      },
+    },
+    {
+      id: "act_check_air_gap",
+      type: "independent_check",
+      title: "Independent Check: Open Switch Air Gap",
+      instructions: "Analyze the electrical effect of an open switch.",
+      config: {
+        type: "independent_check",
+        conceptId: "SCI-ELEC-CIRCUITS",
+        templateId: "tpl_sci_circuits_continuity",
+        itemInstanceId: "itm_sci_circuits_continuity_2",
+        prompt:
+          "If a circuit has an unbroken loop and fresh battery, but the switch is left in the OPEN position, why does the bulb not light up?",
+        questionType: "choice",
+        choices: [
+          {
+            id: "choice_air_gap",
+            text: "The open switch creates an air gap that breaks the continuous conducting loop",
+          },
+          {
+            id: "choice_battery_leak",
+            text: "The battery loses its chemical energy to the surrounding air",
+          },
+          {
+            id: "choice_switch_absorb",
+            text: "The switch absorbs all the electricity so none reaches the bulb",
+          },
+          {
+            id: "choice_wire_reverse",
+            text: "Current flows backwards into the wall",
+          },
+        ],
+        correctAnswer: "choice_air_gap",
+        explanation:
+          "Air is an electrical insulator. Opening the switch introduces an air gap that interrupts the continuous conductive path required for current flow.",
+      },
+    },
+    {
+      id: "act_check_wire_break",
+      type: "independent_check",
+      title: "Independent Check: Detecting Circuit Breaks",
+      instructions: "Diagnose what happens when a wire disconnects from a battery terminal.",
+      config: {
+        type: "independent_check",
+        conceptId: "SCI-ELEC-CIRCUITS",
+        templateId: "tpl_sci_circuits_breaks",
+        itemInstanceId: "itm_sci_circuits_breaks_1",
+        prompt:
+          "A student connects a battery, closed switch, and bulb, but one wire slips off the battery terminal. What happens?",
+        questionType: "choice",
+        choices: [
+          {
+            id: "choice_stops_completely",
+            text: "Current stops flowing completely and the bulb turns off immediately",
+          },
+          {
+            id: "choice_half_light",
+            text: "The bulb stays half-lit because one terminal is still attached",
+          },
+          {
+            id: "choice_air_spark",
+            text: "Electricity jumps through the air between the battery and the bulb",
+          },
+          {
+            id: "choice_reverse_flow",
+            text: "The bulb produces cold light instead of heat",
+          },
+        ],
+        correctAnswer: "choice_stops_completely",
+        explanation:
+          "Current requires a complete, unbroken loop from the positive terminal back to the negative terminal. A single disconnected wire completely halts the flow of electric charges.",
       },
     },
   ],

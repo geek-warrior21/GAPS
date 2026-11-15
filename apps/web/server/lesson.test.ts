@@ -19,7 +19,13 @@ import {
   recordLessonAssessment,
 } from "./lesson/service";
 import { AuthoredLessonPlanner, LlmLessonPlanner } from "./lesson/planner";
-import { MATHS_FRAC_PART_LESSON, SCI_CIRCUITS_LESSON, SCI_CONDUCTORS_LESSON } from "@gaps/content";
+import { validateLessonPlan } from "./lesson/planner-validator";
+import {
+  MATHS_FRAC_PART_LESSON,
+  SCI_CIRCUITS_LESSON,
+  SCI_CIRCUITS_MASTERY_LESSON,
+  SCI_CONDUCTORS_LESSON,
+} from "@gaps/content";
 
 describe("Dynamic Teaching Vertical Slice (Maths & Science)", () => {
   const db = getDb();
@@ -1124,5 +1130,307 @@ describe("Dynamic Teaching Vertical Slice (Maths & Science)", () => {
     expect(sciBelief).toBeDefined();
     expect(sciBelief?.status).toBe("developing");
     expect(sciBelief?.independentN).toBe(1);
+  });
+
+  it("17. Science evidence threshold achieved through authored UI lessons (Mastery Demonstration across 2 templates)", async () => {
+    const studentId = `stu_sci_mastery_ui_${Date.now()}`;
+    await createTestStudent(studentId, `sci_mastery_${Date.now()}`);
+
+    // Step 1: Student completes introductory Science lesson (lesson-sci-circuits-1)
+    await startOrResumeLessonSession(studentId, SCI_CIRCUITS_LESSON.lessonId, db);
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_1_intro",
+      { read: true },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_2_manipulation",
+      { switch: "closed" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_3_predict",
+      { choiceId: "choice_dark" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_4_guided",
+      { value: "closed" },
+      db,
+    );
+
+    // Independent Check 1: Template 1 (tpl_sci_circuits_continuity), Item 1 (itm_sci_circuits_continuity_1)
+    const check1Res = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_5_check",
+      { answer: "choice_a" },
+      db,
+    );
+    expect(check1Res.isCorrect).toBe(true);
+
+    // Verify belief after Check 1: developing, 1 independent attempt, not demonstrated
+    let belief = await createStudentRepo(studentId, db).getConceptBelief("SCI-ELEC-CIRCUITS");
+    expect(belief?.status).toBe("developing");
+    expect(belief?.independentN).toBe(1);
+    expect(belief?.demonstratedAt).toBeNull();
+
+    // Verify next action recommends taking the fresh check / mastery assessment
+    const nextActionBefore = await getRecommendedNextAction(studentId, "science", db);
+    expect(nextActionBefore.actionType).toBe("fresh_check");
+    expect(nextActionBefore.lessonId).toBe("lesson-sci-circuits-mastery");
+
+    // Step 2: Student launches Science Mastery Assessment (lesson-sci-circuits-mastery)
+    await startOrResumeLessonSession(studentId, SCI_CIRCUITS_MASTERY_LESSON.lessonId, db);
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_MASTERY_LESSON.lessonId,
+      "act_mastery_intro",
+      { read: true },
+      db,
+    );
+
+    // Independent Check 2: Template 1 (tpl_sci_circuits_continuity), Item 2 (itm_sci_circuits_continuity_2)
+    const check2Res = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_MASTERY_LESSON.lessonId,
+      "act_check_air_gap",
+      { answer: "choice_air_gap" },
+      db,
+    );
+    expect(check2Res.isCorrect).toBe(true);
+
+    // Belief after Check 2: 2 attempts, but only 1 template so far -> still developing
+    belief = await createStudentRepo(studentId, db).getConceptBelief("SCI-ELEC-CIRCUITS");
+    expect(belief?.status).toBe("developing");
+    expect(belief?.independentN).toBe(2);
+    expect(belief?.demonstratedAt).toBeNull();
+
+    // Independent Check 3: Template 2 (tpl_sci_circuits_breaks), Item 3 (itm_sci_circuits_breaks_1)
+    const check3Res = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_MASTERY_LESSON.lessonId,
+      "act_check_wire_break",
+      { answer: "choice_stops_completely" },
+      db,
+    );
+    expect(check3Res.isCorrect).toBe(true);
+    expect(check3Res.isCompleted).toBe(true);
+
+    // Belief after Check 3: 3 distinct items across 2 distinct templates -> DEMONSTRATED!
+    belief = await createStudentRepo(studentId, db).getConceptBelief("SCI-ELEC-CIRCUITS");
+    expect(belief?.status).toBe("demonstrated");
+    expect(belief?.demonstratedAt).not.toBeNull();
+    expect(belief?.independentN).toBe(3);
+    expect(belief?.independentCorrectN).toBe(3);
+
+    // Verify +20 Sparks awarded in ledger for newly demonstrated mastery
+    const eventsList = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.studentId, studentId), eq(events.type, "sparks_awarded")));
+    const masteryEvent = eventsList.find(
+      (e) => (e.payload as { sourceKind?: string }).sourceKind === "mastery_demonstrated",
+    );
+    expect(masteryEvent).toBeDefined();
+
+    // Step 3: Next action now updates to continue_next_objective (Conductors & Insulators)
+    const nextActionAfter = await getRecommendedNextAction(studentId, "science", db);
+    expect(nextActionAfter.actionType).toBe("continue_next_objective");
+    expect(nextActionAfter.objectiveId).toBe("SCI-ELEC-CONDUCTORS");
+  });
+
+  it("18. Planner validator distinguishes structural schema validity from factual & semantic validity", () => {
+    // Case 1: Schema valid, but factual error in simulation parameters (parts out of bounds)
+    const invalidSimPlan = {
+      ...MATHS_FRAC_PART_LESSON,
+      activities: [
+        MATHS_FRAC_PART_LESSON.activities[0]!,
+        {
+          id: "act_invalid_sim",
+          type: "interactive_manipulation",
+          title: "Invalid Simulation Parts",
+          instructions: "Test invalid parts",
+          config: {
+            type: "interactive_manipulation",
+            simulation: {
+              simulationKind: "fraction_strip",
+              initialParts: 15, // Schema valid (<= 16), but Factual Error: maxParts is 12
+              initialShaded: 2,
+              minParts: 1,
+              maxParts: 12,
+              instruction: "Too many parts",
+            },
+          },
+        },
+      ],
+    };
+
+    const val1 = validateLessonPlan(invalidSimPlan, "MATH-FRAC-PART");
+    expect(val1.outcome.schemaValid).toBe(true); // Conforms to Zod schema types
+    expect(val1.outcome.factualValid).toBe(false); // Fails factual domain boundaries
+    expect(val1.outcome.status).toBe("rejected");
+    expect(val1.outcome.issues.some((i) => i.includes("between 1 and 12"))).toBe(true);
+
+    // Case 2: Schema valid, but choice mismatch (correctAnswer not in choices list)
+    const invalidChoicePlan = {
+      ...MATHS_FRAC_PART_LESSON,
+      activities: [
+        MATHS_FRAC_PART_LESSON.activities[0]!,
+        {
+          id: "act_invalid_check",
+          type: "independent_check",
+          title: "Mismatched Answer",
+          instructions: "Answer check",
+          config: {
+            type: "independent_check",
+            conceptId: "MATH-FRAC-PART",
+            prompt: "What is 1/2?",
+            questionType: "choice",
+            choices: [
+              { id: "choice_a", text: "1/2" },
+              { id: "choice_b", text: "1/3" },
+            ],
+            correctAnswer: "choice_missing", // Factual Error: does not match any choice ID
+            explanation: "Detailed explanation of fractional parts.",
+          },
+        },
+      ],
+    };
+
+    const val2 = validateLessonPlan(invalidChoicePlan, "MATH-FRAC-PART");
+    expect(val2.outcome.schemaValid).toBe(true);
+    expect(val2.outcome.factualValid).toBe(false);
+    expect(val2.outcome.status).toBe("rejected");
+    expect(val2.outcome.issues.some((i) => i.includes("does not match any choice ID"))).toBe(true);
+  });
+
+  it("19. Model-planned teaching produces materially different teaching sequences for struggling vs challenge profiles (Maths and Science)", async () => {
+    const planner = new LlmLessonPlanner();
+
+    // Subject 1: Maths (MATH-FRAC-PART)
+    // Profile A: Struggling with Misconception REV
+    const mathsStruggling = await planner.planLessonWithDetails({
+      subject: "maths",
+      level: 6,
+      topicId: "maths-frac-part",
+      objectiveId: "MATH-FRAC-PART",
+      learnerProfile: {
+        profileType: "struggling",
+        priorMastery: "struggling",
+        namedMisconception: "REV",
+      },
+    });
+
+    // Profile B: Ready for a Challenge
+    const mathsChallenge = await planner.planLessonWithDetails({
+      subject: "maths",
+      level: 6,
+      topicId: "maths-frac-part",
+      objectiveId: "MATH-FRAC-PART",
+      learnerProfile: {
+        profileType: "ready_for_challenge",
+        priorMastery: "demonstrated",
+      },
+    });
+
+    // Verify distinct structures for Maths
+    expect(mathsStruggling.plan.title).toContain("Inversion");
+    expect(mathsChallenge.plan.title).toContain("Challenge");
+
+    // Struggling has remediation branch addressing reversal
+    const strugglingPredict = mathsStruggling.plan.activities.find(
+      (a) => a.type === "predict_and_observe",
+    );
+    expect(strugglingPredict?.remediation).toBeDefined();
+    expect(strugglingPredict?.remediation?.targetedExplanation).toContain(
+      "Denominator is the 'Down' number",
+    );
+
+    // Challenge has multiple complex checks and no remediation hand-holding
+    const challengeChecks = mathsChallenge.plan.activities.filter(
+      (a) => a.type === "independent_check",
+    );
+    expect(challengeChecks.length).toBeGreaterThanOrEqual(2);
+    expect(mathsChallenge.plan.activities.some((a) => a.remediation)).toBe(false);
+
+    // Subject 2: Science (SCI-ELEC-CIRCUITS)
+    // Profile A: Struggling with Air Gap Misconception
+    const sciStruggling = await planner.planLessonWithDetails({
+      subject: "science",
+      level: 6,
+      topicId: "sci-elec-circuits",
+      objectiveId: "SCI-ELEC-CIRCUITS",
+      learnerProfile: {
+        profileType: "struggling",
+        priorMastery: "struggling",
+        namedMisconception: "AIR_GAP",
+      },
+    });
+
+    // Profile B: Ready for a Challenge
+    const sciChallenge = await planner.planLessonWithDetails({
+      subject: "science",
+      level: 6,
+      topicId: "sci-elec-circuits",
+      objectiveId: "SCI-ELEC-CIRCUITS",
+      learnerProfile: {
+        profileType: "ready_for_challenge",
+        priorMastery: "demonstrated",
+      },
+    });
+
+    expect(sciStruggling.plan.title).toContain("Air Gap");
+    expect(sciChallenge.plan.title).toContain("Fault Diagnosis");
+
+    const sciStrugglingCheck = sciStruggling.plan.activities.find(
+      (a) => a.type === "independent_check",
+    );
+    expect((sciStrugglingCheck?.config as { prompt: string }).prompt).toContain("opening a switch");
+
+    const sciChallengeChecks = sciChallenge.plan.activities.filter(
+      (a) => a.type === "independent_check",
+    );
+    expect(sciChallengeChecks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("20. Planner fallback guarantees authored lesson when LLM fails or is disabled without logging student personal data", async () => {
+    // When LLM runtime is disabled (the default setting in this project), LlmLessonPlanner safely falls back
+    const planner = new LlmLessonPlanner();
+    const result = await planner.planLessonWithDetails({
+      subject: "science",
+      level: 6,
+      topicId: "sci-elec-circuits",
+      objectiveId: "SCI-ELEC-CIRCUITS",
+      learnerProfile: {
+        profileType: "new_learner",
+        priorMastery: "not_started",
+      },
+    });
+
+    expect(result.plan).toBeDefined();
+    expect(result.plan.subject).toBe("science");
+    expect(result.isFallback).toBe(true);
+    expect(result.fallbackReason).toBe("LLM_PROVIDER_DISABLED");
+
+    // Verify metadata does not log student personal data
+    expect(result.metadata.model).toBeDefined();
+    expect(result.metadata.version).toBe("1.0");
+    expect(result.metadata.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.metadata.validation.schemaValid).toBe(true);
+    expect(result.metadata.validation.factualValid).toBe(true);
+
+    // Check learner profile used contains only synthetic metadata
+    expect(result.metadata.learnerProfileUsed.profileType).toBe("new_learner");
+    expect(result.metadata.learnerProfileUsed).not.toHaveProperty("studentId");
+    expect(result.metadata.learnerProfileUsed).not.toHaveProperty("name");
   });
 });

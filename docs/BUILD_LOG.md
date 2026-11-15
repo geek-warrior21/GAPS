@@ -904,3 +904,63 @@ Implement an evidence-driven adaptive loop through the shared lesson engine for 
 - **Line coverage:** `packages/domain` line coverage >= 93.7% (exceeds >= 90% requirement).
 - **`pnpm test:e2e` (`playwright`):** 16 scenarios, 32 tests passed across Desktop Chrome and Mobile Chrome.
 - **`pnpm verify`:** All gates passed cleanly.
+
+---
+
+## 2026-11-15 — Model-Planned Teaching Preview, Multi-Stage Validation, and Science Mastery Demonstration
+
+### 1. Built
+
+1. **Science Evidence Threshold via UI Lessons:**
+   - Authored distinct assessment templates and items for Science:
+     - `tpl_sci_circuits_continuity`: Item 1 (`itm_sci_circuits_continuity_1`, loop continuity) in `lesson-sci-circuits-1`, and Item 2 (`itm_sci_circuits_continuity_2`, open switch air gap) in `lesson-sci-circuits-mastery`.
+     - `tpl_sci_circuits_breaks`: Item 3 (`itm_sci_circuits_breaks_1`, circuit break detection) in `lesson-sci-circuits-mastery`.
+   - Wired deterministic seed calculation in `recordLessonAssessment` to avoid database unique constraint collisions on `(templateId, templateVersion, seed)`.
+   - Enabled students to progress from introductory simulation to mastery assessment across 2 templates, reaching the authoritative evidence threshold ($\ge 3$ distinct items, $\ge 2$ templates, 0 assistance) to achieve `demonstrated` status, record a `mastery_demonstrated` event, award +20 Sparks to `sparks_ledger`, and update the Next Milestone to Conductors & Insulators.
+
+2. **Developer-Only Lesson-Planning Preview (`/dev/lesson-planner`):**
+   - Built a developer-only lesson generation interface for Class 6 Maths and Science objectives:
+     - Objectives supported: `MATH-FRAC-PART`, `MATH-FRAC-EQUIV`, `SCI-ELEC-CIRCUITS`, `SCI-ELEC-CONDUCTORS`.
+     - Synthetic learner profiles: `new_learner`, `struggling` (with named misconceptions: `REVERSAL`, `WHOLE_PART_CONFUSION`, `AIR_GAP`, `CURRENT_CONSUMPTION`), and `ready_for_challenge`.
+   - Curated Source Pack (`apps/web/server/lesson/planner-source-pack.ts`):
+     - Pedagogical objectives, prerequisite chains, grounded domain metaphors, and strict simulation parameter bounds.
+     - Formal activity catalogue defining schemas and parameters for all 5 activity types (`concept_intro`, `interactive_simulation`, `predict_and_observe`, `guided_challenge`, `independent_check`).
+   - Multi-Stage Validation Architecture (`apps/web/server/lesson/planner-validator.ts`):
+     - Stage 1: Structural Zod schema validation (`schemaValid`).
+     - Stage 2: Factual and simulation integrity validation (`factualValid`), strictly validating parameter bounds (parts $\le 12$, shaded $\le$ parts, valid switch/conductor states, valid answer choices, single correct choice).
+     - Stage 3: Pedagogical match validation (`pedagogicalMatch`), verifying that struggling profiles include tailored remediation addressing the specific misconception, and challenge profiles offer multi-step rigor without unnecessary hand-holding.
+     - Strict separation: schema validation alone is never presented as factual validation.
+   - Live Sandboxed Lesson Player:
+     - Sandboxed mode in `<LessonPlayer isPreview={true} />` using client-side deterministic response evaluator `evaluatePreviewActivityResponse`.
+     - Complete testbed isolated from production student DB tables.
+   - Fallback Guarantee:
+     - When `LLM_PROVIDER=disabled` or during provider failures/timeouts, `LlmLessonPlanner` transparently falls back to authored lesson configurations, recording audit metadata (`model`, `latencyMs`, `validationOutcome`, `fallbackReason`) without logging student PII.
+
+3. **Automated Testing & E2E Acceptance:**
+   - Added unit and integration tests (Tests 17–20) in `apps/web/server/lesson.test.ts`:
+     - Test 17: Science evidence threshold achieved through authored UI lessons.
+     - Test 18: Multi-stage validator correctly distinguishes structural schema validity from factual & simulation integrity.
+     - Test 19: Planner outputs materially distinct lesson sequences for struggling vs challenge profiles.
+     - Test 20: Planner fallback guarantees authored lesson when LLM fails or is disabled without logging student PII.
+   - Added Playwright E2E Scenarios (S17 & S18) in `apps/web/e2e/student-journey.spec.ts`:
+     - S17: Science student completes Circuit Simulator, takes Mastery Assessment across 2 templates, and demonstrates mastery (+20 Sparks and Next Milestone advancement).
+     - S18: Developer opens `/dev/lesson-planner`, selects profile and objective, generates plan, inspects multi-stage validation badges, and interacts with preview player.
+   - Seeded test students `rohan` (Desktop) and `priya` (Mobile) with automated test-evidence isolation to ensure deterministic E2E runs.
+
+### 2. Verification Results
+
+- **`pnpm typecheck`:** 6/6 workspace packages passed cleanly (0 errors).
+- **`pnpm lint`:** 0 errors, 0 warnings.
+- **`pnpm format:check`:** All files match Prettier code style.
+- **`pnpm content:check`:** 42 templates verified across 500 seeds each.
+- **`pnpm db:migrate && pnpm db:seed`:** Migrations and seed data applied cleanly.
+- **`pnpm test` (`vitest`):** 41 test files, 292 tests passed (100% pass rate).
+- **Line coverage:** `packages/domain` line coverage >= 93.7%.
+- **`pnpm test:e2e` (`playwright`):** 18 scenarios, 36 tests passed across Desktop Chrome and Mobile Chrome.
+- **`pnpm verify`:** All gates passed cleanly.
+
+### 3. Assumptions & Limitations
+
+- **LLM Provider Isolation:** The project remains in `LLM_PROVIDER=disabled` mode by default. The preview planner safely executes in fallback mode using curated high-fidelity profile fixtures matching the exact versioned lesson schema.
+- **Student Data Isolation:** The developer preview generates transient plans that execute entirely in-memory and do not create rows in `learning_sessions`, `attempts`, or `concept_beliefs`.
+- **Factual Validation Scope:** The factual validator enforces domain-specific simulation invariants (e.g., maximum initial partition count $\le 12$, shaded parts $\le$ total parts, valid switch and conductor states). Additional complex mathematical domain verification will expand as new activity types are introduced.

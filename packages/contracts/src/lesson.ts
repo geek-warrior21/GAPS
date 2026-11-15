@@ -112,6 +112,9 @@ export type GuidedPracticeConfig = z.infer<typeof GuidedPracticeConfigSchema>;
 export const IndependentCheckConfigSchema = z.object({
   type: z.literal("independent_check"),
   conceptId: z.string().optional(),
+  templateId: z.string().optional(),
+  itemInstanceId: z.string().optional(),
+  seed: z.number().int().positive().optional(),
   prompt: z.string(),
   questionType: z.enum(["choice", "number", "fraction"]),
   choices: z.array(z.object({ id: z.string(), text: z.string() })).optional(),
@@ -267,3 +270,59 @@ export const RecommendedNextActionSchema = z.object({
   reasonCode: z.string(),
 });
 export type RecommendedNextAction = z.infer<typeof RecommendedNextActionSchema>;
+
+// ============================================================================
+// Developer Preview: Lesson Planner Schemas
+// ============================================================================
+
+export const LearnerProfileTypeSchema = z.enum([
+  "new_learner",
+  "struggling",
+  "ready_for_challenge",
+]);
+export type LearnerProfileType = z.infer<typeof LearnerProfileTypeSchema>;
+
+export const SyntheticLearnerProfileSchema = z.object({
+  profileType: LearnerProfileTypeSchema,
+  priorMastery: z
+    .enum(["not_started", "struggling", "developing", "demonstrated"])
+    .default("not_started"),
+  namedMisconception: z.string().optional(),
+  notes: z.string().optional(),
+});
+export type SyntheticLearnerProfile = z.infer<typeof SyntheticLearnerProfileSchema>;
+
+export const LessonPlanValidationOutcomeSchema = z.object({
+  schemaValid: z.boolean(),
+  factualValid: z.boolean(),
+  pedagogicalMatch: z.boolean(),
+  issues: z.array(z.string()),
+  status: z.enum(["passed", "rejected"]),
+});
+export type LessonPlanValidationOutcome = z.infer<typeof LessonPlanValidationOutcomeSchema>;
+
+export const LessonPlanGenerateRequestSchema = z.object({
+  subject: SubjectIdSchema,
+  level: z.literal(6).default(6),
+  topicId: z.string(),
+  objectiveId: z.string(),
+  learnerProfile: SyntheticLearnerProfileSchema,
+});
+export type LessonPlanGenerateRequest = z.infer<typeof LessonPlanGenerateRequestSchema>;
+
+export const LessonPlanGenerateResponseSchema = z.object({
+  plan: LessonPlanSchema,
+  isFallback: z.boolean(),
+  fallbackReason: z.string().optional(),
+  metadata: z.object({
+    model: z.string(),
+    version: z.string(),
+    latencyMs: z.number(),
+    validation: LessonPlanValidationOutcomeSchema,
+    learnerProfileUsed: z.object({
+      profileType: LearnerProfileTypeSchema,
+      namedMisconception: z.string().optional(),
+    }),
+  }),
+});
+export type LessonPlanGenerateResponse = z.infer<typeof LessonPlanGenerateResponseSchema>;

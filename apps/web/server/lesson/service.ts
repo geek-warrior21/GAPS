@@ -86,6 +86,9 @@ interface RecordLessonAssessmentParams {
   stepSeq: number;
   lessonPlan: LessonPlan;
   activityId: string;
+  templateId?: string;
+  itemInstanceId?: string;
+  seed?: number;
   conceptId: ConceptId;
   questionText: string;
   submittedAnswer: string;
@@ -135,14 +138,28 @@ export async function recordLessonAssessment(params: RecordLessonAssessmentParam
   }
 
   // 2. Ensure item instance in item_instances table
-  const templateId = `tpl_lesson_${lessonPlan.topicId}_${activityId}`;
-  const itemInstanceId = `itm_lesson_${lessonPlan.lessonId}_${activityId}`;
+  const templateId = params.templateId ?? `tpl_lesson_${lessonPlan.topicId}_${activityId}`;
+  const itemInstanceId = params.itemInstanceId ?? `itm_lesson_${lessonPlan.lessonId}_${activityId}`;
+
+  let seed = params.seed ?? 1;
+  if (!params.seed && params.itemInstanceId) {
+    const match = /_(\d+)$/.exec(params.itemInstanceId);
+    if (match && match[1]) {
+      seed = parseInt(match[1], 10);
+    } else {
+      let h = 0;
+      for (let i = 0; i < params.itemInstanceId.length; i++) {
+        h = (h * 31 + params.itemInstanceId.charCodeAt(i)) & 0x7fffffff;
+      }
+      seed = (h % 100000) + 1;
+    }
+  }
 
   const item = await findOrCreateItemInstance(db, {
     id: itemInstanceId,
     templateId,
     templateVersion: 1,
-    seed: 1,
+    seed,
     conceptId,
     prompt: { text: questionText },
     answer: { value: correctAnswer },
@@ -248,7 +265,19 @@ export async function recordLessonAssessment(params: RecordLessonAssessmentParam
     existingBelief?.status !== "retained"
   ) {
     const spk = await studentRepo.awardSparks(attemptId, "mastery_demonstrated", 20);
-    if (spk.awarded) sparksAwarded += 20;
+    if (spk.awarded) {
+      sparksAwarded += 20;
+      await studentRepo.recordEvent({
+        sessionId,
+        type: "sparks_awarded",
+        payload: {
+          amount: 20,
+          sourceKind: "mastery_demonstrated",
+          conceptId,
+          attemptId,
+        },
+      });
+    }
   }
 
   return {
@@ -282,6 +311,7 @@ export async function startOrResumeLessonSession(
         subject: staticLesson.subject,
         level: staticLesson.level,
         topicId: staticLesson.topicId,
+        lessonId: staticLesson.lessonId,
       });
     }
   } catch (err) {
@@ -597,6 +627,8 @@ export async function submitLessonActivityResponse(
           stepSeq: session.stepSeq,
           lessonPlan,
           activityId,
+          templateId: (checkConfig as { templateId?: string }).templateId,
+          itemInstanceId: (checkConfig as { itemInstanceId?: string }).itemInstanceId,
           conceptId,
           questionText: checkConfig.prompt ?? remediation.followUpCheck.title,
           submittedAnswer,
@@ -980,6 +1012,9 @@ export async function submitLessonActivityResponse(
       stepSeq: session.stepSeq,
       lessonPlan,
       activityId,
+      templateId: (config as { templateId?: string }).templateId,
+      itemInstanceId: (config as { itemInstanceId?: string }).itemInstanceId,
+      seed: (config as { seed?: number }).seed,
       conceptId,
       questionText: config.prompt ?? currentActivity.title,
       submittedAnswer,
@@ -1193,16 +1228,21 @@ export async function getRecommendedNextAction(
     if (
       !isMastered &&
       (hadAssistance ||
-        (belief && belief.independentCorrectN === 0 && (belief.independentN ?? 0) > 0))
+        (belief && (belief.independentN ?? 0) > 0 && belief.status !== "demonstrated"))
     ) {
+      const targetLessonId =
+        topic.conceptId === "SCI-ELEC-CIRCUITS"
+          ? "lesson-sci-circuits-mastery"
+          : topic.defaultLessonId;
+
       return {
         actionType: "fresh_check",
         title: `Fresh Check: ${topic.studentTitle}`,
-        description: `You practiced with support! Ready to prove your understanding independently?`,
+        description: `You practiced earlier! Ready to prove your understanding with an independent check?`,
         objectiveId: topic.conceptId as ConceptId,
         objectiveTitle: topic.studentTitle,
         subject: topic.subject,
-        lessonId: topic.defaultLessonId,
+        lessonId: targetLessonId,
         ctaLabel: "Take Independent Check",
         reasonCode: "ASSISTED_PRACTICE_NEEDS_FRESH_CHECK",
       };

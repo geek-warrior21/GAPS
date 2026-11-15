@@ -1,5 +1,27 @@
 /* eslint-disable no-console */
 import { test, expect } from "@playwright/test";
+import {
+  getDb,
+  conceptBeliefs,
+  attempts,
+  learningSessions,
+  sparksLedger,
+  events,
+  inArray,
+} from "@gaps/db";
+
+async function resetStudentEvidence(studentIds: string[]) {
+  try {
+    const db = getDb();
+    await db.delete(conceptBeliefs).where(inArray(conceptBeliefs.studentId, studentIds));
+    await db.delete(attempts).where(inArray(attempts.studentId, studentIds));
+    await db.delete(learningSessions).where(inArray(learningSessions.studentId, studentIds));
+    await db.delete(sparksLedger).where(inArray(sparksLedger.studentId, studentIds));
+    await db.delete(events).where(inArray(events.studentId, studentIds));
+  } catch (err) {
+    console.warn("Could not reset student evidence directly:", err);
+  }
+}
 
 test.describe("Student Learning Journey & Acceptance Scenarios", () => {
   test.beforeEach(async ({ page }) => {
@@ -813,5 +835,192 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     // Resumed back at stopping point with practice options
     await expect(page.getByText("Support & Reflection")).toBeVisible();
     await expect(page.getByText("Let's Pause & Review Key Ideas")).toBeVisible();
+  });
+
+  test("S17: Science student completes Circuit Simulator, takes Mastery Assessment across 2 templates, and demonstrates mastery (+20 Sparks)", async ({
+    page,
+  }, testInfo) => {
+    const isMobile = testInfo.project.name.includes("Mobile");
+    const username = isMobile ? "priya" : "rohan";
+    const pin = isMobile ? "888888" : "777777";
+    const studentId = isMobile
+      ? "stu_01J00000000000000000000006"
+      : "stu_01J00000000000000000000005";
+    await resetStudentEvidence([studentId]);
+
+    // 1. Login
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", username);
+    await page.fill("#pin", pin);
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn and switch to Science
+    await page.goto("/learn");
+    await expect(page).toHaveURL(/\/learn/);
+
+    const scienceTab = page.locator("[data-testid='tab-subject-science']");
+    await expect(scienceTab).toBeVisible();
+    await scienceTab.click();
+
+    // 3. Launch Electric Circuits Topic 1 (lesson-sci-circuits-1)
+    const launchCircuitsBtn = page.locator("[data-testid='start-circuits-lesson-button']");
+    await expect(launchCircuitsBtn).toBeVisible();
+    await launchCircuitsBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-1/);
+
+    // Activity 1: Intro -> click Let's Explore
+    await expect(page.getByRole("heading", { name: "The Torch Switch Mystery" })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Activity 2: Interactive Simulation -> click Next Step
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Activity 3: Predict & Observe (Correct choice: choice_dark)
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+    const correctPrediction = page.locator("button:has-text('No, the bulb stays dark')");
+    await expect(correctPrediction).toBeVisible();
+    await correctPrediction.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // Activity 4: Guided Practice
+    await expect(page.getByText("Guided Challenge", { exact: true })).toBeVisible();
+    const toggleSwitchBtn = page.locator("[data-testid='toggle-circuit-switch']");
+    await expect(toggleSwitchBtn).toBeVisible();
+    await toggleSwitchBtn.click();
+    await page.click("button:has-text('Check Solution')");
+    await page.click("button:has-text('Continue')");
+
+    // Activity 5: Independent Check 1 (Template 1: Continuity, Item 1)
+    await expect(
+      page.getByRole("heading", { name: "Independent Check: Check Your Understanding" }),
+    ).toBeVisible();
+    const check1Choice = page.locator("button:has-text('A complete, closed conducting loop')");
+    await expect(check1Choice).toBeVisible();
+    await check1Choice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Lesson 1 Completed screen -> Return to Curriculum
+    await expect(page.getByText("Outstanding Effort!")).toBeVisible();
+    await page.click("button:has-text('Return to Curriculum')");
+    await expect(page).toHaveURL(/\/learn/);
+
+    // 4. Return to Learn -> Switch to Science tab
+    await page.locator("[data-testid='tab-subject-science']").click();
+
+    // Verify Next Action banner surfaces Fresh Check / Mastery Assessment
+    const nextActionCard = page.locator("[data-testid='next-action-card']");
+    await expect(nextActionCard).toBeVisible();
+    await expect(page.getByText("Action on Return: Fresh Check")).toBeVisible();
+
+    // Launch Mastery Assessment via Next Action Button
+    const nextActionBtn = page.locator("[data-testid='next-action-button']");
+    await expect(nextActionBtn).toBeVisible();
+    await nextActionBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-mastery/);
+
+    // Mastery Lesson: Activity 1: Intro -> click Let's Explore
+    await expect(page.getByRole("heading", { name: "Circuit Mastery Check" })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Mastery Lesson: Activity 2: Independent Check 2 (Template 1: Continuity, Item 2: Open Switch Air Gap)
+    await expect(
+      page.getByRole("heading", { name: "Independent Check: Open Switch Air Gap" }),
+    ).toBeVisible();
+    const airGapChoice = page.locator("button:has-text('The open switch creates an air gap')");
+    await expect(airGapChoice).toBeVisible();
+    await airGapChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Submit & Continue')");
+
+    // Mastery Lesson: Activity 3: Independent Check 3 (Template 2: Breaks, Item 3: Detecting Circuit Breaks)
+    await expect(
+      page.getByRole("heading", { name: "Independent Check: Detecting Circuit Breaks" }),
+    ).toBeVisible();
+    const wireBreakChoice = page.locator(
+      "button:has-text('Current stops flowing completely and the bulb turns off immediately')",
+    );
+    await expect(wireBreakChoice).toBeVisible();
+    await wireBreakChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Correct Response!")).toBeVisible();
+    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+
+    // Mastery Lesson Completed Screen
+    await expect(page.getByText("Outstanding Effort!")).toBeVisible();
+    await page.click("button:has-text('Return to Curriculum')");
+    await expect(page).toHaveURL(/\/learn/);
+
+    // Switch to Science tab -> Next Action advances to Topic 2: Conductors & Insulators
+    await page.locator("[data-testid='tab-subject-science']").click();
+    await expect(page.getByText("🚀 Next Milestone")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Next Objective: Conductors and insulators" }),
+    ).toBeVisible();
+  });
+
+  test("S18: Developer-only lesson-planning preview produces multi-stage validated plans and renders in preview player", async ({
+    page,
+  }) => {
+    // 1. Visit dev lesson planner
+    await page.goto("/dev/lesson-planner");
+    await expect(
+      page.getByRole("heading", { name: "Model-Planned Teaching Engine: Live Preview" }),
+    ).toBeVisible();
+    await expect(page.getByText("Developer Mode")).toBeVisible();
+
+    // 2. Select Science and Struggling Profile with AIR_GAP misconception
+    await page.locator("[data-testid='select-subject-science']").click();
+    await page.locator("[data-testid='profile-struggling']").click();
+
+    const misconceptionSelect = page.locator("[data-testid='select-misconception']");
+    await expect(misconceptionSelect).toBeVisible();
+    await misconceptionSelect.selectOption("AIR_GAP");
+
+    // 3. Generate Lesson Plan
+    const generateBtn = page.locator("[data-testid='generate-plan-button']");
+    await expect(generateBtn).toBeVisible();
+    await generateBtn.click();
+
+    // 4. Verify Audit Panel and Multi-stage Validation Badges
+    const auditPanel = page.locator("[data-testid='planner-audit-panel']");
+    await expect(auditPanel).toBeVisible();
+    await expect(page.locator("[data-testid='badge-generation-model']")).toBeVisible();
+    await expect(page.locator("[data-testid='badge-generation-latency']")).toBeVisible();
+
+    // Validation distinctions
+    await expect(page.locator("[data-testid='val-schema-card']")).toContainText(
+      "✓ Schema Valid (Zod)",
+    );
+    await expect(page.locator("[data-testid='val-factual-card']")).toContainText(
+      "✓ Factual Integrity Valid",
+    );
+    await expect(page.locator("[data-testid='val-pedagogical-card']")).toContainText(
+      "✓ Tailored: struggling",
+    );
+
+    // 5. Verify sandboxed preview player is rendered
+    const previewPlayer = page.locator("[data-testid='preview-lesson-player']");
+    await expect(previewPlayer).toBeVisible();
+    await expect(page.getByText("Interactive Lesson Player Preview")).toBeVisible();
+
+    // Click "Let's Explore" inside preview player to verify interactive operation
+    await previewPlayer.locator('button:has-text("Let\'s Explore")').click();
+    await expect(previewPlayer.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+
+    // 6. Test Challenge Profile Generation
+    await page.locator("[data-testid='profile-challenge']").click();
+    await generateBtn.click();
+    await expect(page.locator("[data-testid='val-pedagogical-card']")).toContainText(
+      "✓ Tailored: ready_for_challenge",
+    );
+    await expect(page.getByText("Interactive Lesson Player Preview")).toBeVisible();
   });
 });
