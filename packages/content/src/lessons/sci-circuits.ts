@@ -118,6 +118,7 @@ export const SCI_CIRCUITS_LESSON: LessonPlan = {
           instructions: "Apply what you just learned to this fresh scenario.",
           config: {
             type: "independent_check",
+            conceptId: "SCI-ELEC-CIRCUITS",
             prompt:
               "What happens if one wire is disconnected from the battery terminal in a circuit?",
             questionType: "choice",
@@ -193,6 +194,7 @@ export const SCI_CIRCUITS_LESSON: LessonPlan = {
       instructions: "Demonstrate your understanding of electric circuits.",
       config: {
         type: "independent_check",
+        conceptId: "SCI-ELEC-CIRCUITS",
         prompt:
           "Which of the following conditions is required for an electric bulb in a circuit to glow?",
         questionType: "choice",

@@ -38,6 +38,7 @@ export const CURRICULUM_TOPICS: readonly CurriculumTopic[] = [
     description:
       "Investigate how electric current flows through complete, unbroken loops with switches and bulbs.",
     defaultLessonId: "lesson-sci-circuits-1",
+    conceptId: "SCI-ELEC-CIRCUITS",
     strand: "electricity",
   },
   {
@@ -49,6 +50,7 @@ export const CURRICULUM_TOPICS: readonly CurriculumTopic[] = [
     description:
       "Test different materials in a circuit to see which conduct electricity and which insulate.",
     defaultLessonId: "lesson-sci-conductors-1",
+    conceptId: "SCI-ELEC-CONDUCTORS",
     strand: "electricity",
   },
 ] as const;

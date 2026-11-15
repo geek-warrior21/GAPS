@@ -31,7 +31,7 @@ describe("Principal-Scoped Repositories", () => {
       expect(chapters.length).toBeGreaterThanOrEqual(3);
 
       const concepts = await listConcepts(db);
-      expect(concepts.length).toBe(14);
+      expect(concepts.length).toBeGreaterThanOrEqual(14);
 
       const misconceptions = await listMisconceptions(db);
       expect(misconceptions.length).toBeGreaterThanOrEqual(15);

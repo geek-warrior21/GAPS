@@ -844,3 +844,63 @@ Implement an evidence-driven adaptive loop through the shared lesson engine for 
 - **`pnpm test` (`vitest`):** 41 test files, 283 tests passed (100% pass rate).
 - **Line coverage:** `packages/domain` line coverage >= 93.7%.
 - **`pnpm test:e2e` (`playwright`):** 15 scenarios, 30 tests passed across Desktop Chrome and Mobile Chrome.
+
+## Cross-Session Lesson Evidence Routing & Next Action on Return (2026-11-15)
+
+### 1. Built
+
+1. **Assessed Objectives to Stable Concept IDs (`packages/content/`, `packages/contracts/`, `packages/domain/`):**
+   - Maths: Mapped to stable `MATH-FRAC-PART`.
+   - Science: Defined stable concept IDs `SCI-ELEC-CIRCUITS` and `SCI-ELEC-CONDUCTORS` in `CONCEPT_IDS` (`packages/domain/src/types.ts`) and `ConceptIdSchema` (`packages/contracts/src/domain.ts`).
+   - Created `packages/content/src/science.ts` exporting `SCIENCE_CHAPTERS` (`SCI-ELEC`) and `SCIENCE_CONCEPTS` (`SCI-ELEC-CIRCUITS`, `SCI-ELEC-CONDUCTORS`), synced via `packages/db/src/content-sync.ts`.
+   - Added 3-route explanations (picture, everyday, steps) for `SCI-ELEC-CIRCUITS` and `SCI-ELEC-CONDUCTORS` in `packages/content/src/explanations.ts`.
+   - Wired `conceptId` into lesson configurations in `sci-circuits.ts`, `sci-conductors.ts`, and `maths-frac-part.ts`.
+
+2. **Authoritative Learner Model Pipeline Integration (`apps/web/server/lesson/service.ts`):**
+   - Implemented `recordLessonAssessment`:
+     - Checks idempotency on `(sessionId, clientAttemptId)`.
+     - Calls `findOrCreateItemInstance` ensuring valid `item_instances` with stable `templateId` and `conceptId`.
+     - Calls `studentRepo.recordAttempt` preserving question identity, template identity, answer correctness, timestamp, and server-determined assistance level.
+     - Runs authoritative `replayTransitions` from pure domain `beliefReducer` across all student attempts for the concept.
+     - Calls `studentRepo.upsertConceptBelief` to persist verified `status`, `pMastery`, `attemptsCount`, and `history`.
+     - Awards +20 mastery Sparks if belief status newly reaches `"demonstrated"`.
+
+3. **Mastery Rules & Assistance Integrity:**
+   - Reconciled colloquial "3 consecutive correct" with authoritative SPEC §9 & `packages/domain/src/belief.ts`: requires in last 4 independent attempts $\ge 3$ correct, latest 2 correct, spanning $\ge 3$ distinct items, $\ge 2$ distinct templates (if available), and `assistance = 0`.
+   - Remediation follow-up checks (`stage === "followup_check"`) are explicitly recorded with `assistanceLevel = 1` (assisted learning). They never enter independent evidence and cannot establish mastery.
+   - Independent checks (`act_5_check`) are evaluated with `assistanceLevel = 0`.
+
+4. **Stopping Point "Save & Finish for Now" & Continued Practice:**
+   - Enhanced `stopping_point` activity renderer with two distinct choices:
+     - "Save & Finish for Now": sets `stoppingPointSaved: true` and redirects smoothly to `/learn`.
+     - "Acknowledge & Continue": clears branch and allows continued practice.
+   - Resuming a saved stopping point returns the student directly to their saved stopping point with state intact.
+
+5. **Evidence-Based Next Action on Return (`/api/v1/curriculum/next-action`):**
+   - Implemented deterministic explicit recommendation rules:
+     - `revisit_unresolved`: struggling student who paused at a stopping point or ended with `needs_support`.
+     - `fresh_check`: student who succeeded in supported remediation (`remediated`) but hasn't demonstrated independent mastery yet.
+     - `continue_next_objective`: student who has demonstrated mastery.
+     - `start_objective`: default starting path.
+   - Surfaced responsive Next Action card on `/learn` with one-click direct jump back into the appropriate lesson or check.
+
+6. **End-to-End Tests & Verification:**
+   - Added 5 integration tests in `apps/web/server/lesson.test.ts` (Tests 12–16) verifying:
+     - Struggling student pauses at stopping point, saves & finishes, sees `revisit_unresolved` on return, and reliably resumes.
+     - Supported remediation success does not establish mastery (`assistanceLevel = 1`).
+     - Sufficient independent evidence (3 correct across 2 templates) promotes belief to `demonstrated`, awards +20 Sparks, and suggests `continue_next_objective`.
+     - Duplicate submissions with identical `clientAttemptId` do not double-count.
+     - Both Maths and Science work through the shared learner model pipeline.
+   - Added Playwright E2E Scenario S16 in `apps/web/e2e/student-journey.spec.ts`.
+
+### 2. Verification Results
+
+- **`pnpm typecheck`:** 6/6 workspace packages passed cleanly (0 errors).
+- **`pnpm lint`:** 0 errors, 0 warnings.
+- **`pnpm format:check`:** All files match Prettier code style.
+- **`pnpm content:check`:** 42 templates verified across 500 seeds each.
+- **`pnpm db:migrate && pnpm db:seed`:** Migrations and seed data applied cleanly.
+- **`pnpm test` (`vitest`):** 41 test files, 288 tests passed (100% pass rate).
+- **Line coverage:** `packages/domain` line coverage >= 93.7% (exceeds >= 90% requirement).
+- **`pnpm test:e2e` (`playwright`):** 16 scenarios, 32 tests passed across Desktop Chrome and Mobile Chrome.
+- **`pnpm verify`:** All gates passed cleanly.

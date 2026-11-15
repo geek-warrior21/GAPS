@@ -72,6 +72,7 @@ export const SCI_CONDUCTORS_LESSON: LessonPlan = {
       instructions: "Classify materials based on electrical conductivity.",
       config: {
         type: "independent_check",
+        conceptId: "SCI-ELEC-CONDUCTORS",
         prompt: "Which of the following objects is an electrical insulator?",
         questionType: "choice",
         choices: [

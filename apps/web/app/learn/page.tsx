@@ -3,7 +3,11 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { ConceptsResponse, HomeDashboardResponse } from "@gaps/contracts";
+import type {
+  ConceptsResponse,
+  HomeDashboardResponse,
+  RecommendedNextAction,
+} from "@gaps/contracts";
 import { Header } from "@/components/common/Header";
 
 const STATUS_CONFIG: Record<string, { label: string; badgeClass: string; icon: string }> = {
@@ -39,6 +43,7 @@ export default function LearnPage() {
   const [selectedSubject, setSelectedSubject] = useState<"maths" | "science">("maths");
   const [conceptsData, setConceptsData] = useState<ConceptsResponse | null>(null);
   const [homeData, setHomeData] = useState<HomeDashboardResponse | null>(null);
+  const [nextAction, setNextAction] = useState<RecommendedNextAction | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,6 +82,21 @@ export default function LearnPage() {
 
     loadData();
   }, [router]);
+
+  useEffect(() => {
+    async function fetchNextAction() {
+      try {
+        const res = await fetch(`/api/v1/curriculum/next-action?subject=${selectedSubject}`);
+        if (res.ok) {
+          const json: RecommendedNextAction = await res.json();
+          setNextAction(json);
+        }
+      } catch {
+        // Ignore background fetch error
+      }
+    }
+    fetchNextAction();
+  }, [selectedSubject]);
 
   const handleStartConcept = (conceptId: string) => {
     router.push(`/session?conceptId=${conceptId}&mode=learn`);
@@ -167,6 +187,65 @@ export default function LearnPage() {
             </button>
           </div>
         </div>
+
+        {/* Recommended Next Action on Return based on persisted evidence */}
+        {nextAction && nextAction.actionType !== "start_objective" && (
+          <div
+            data-testid="next-action-card"
+            className={`p-6 rounded-3xl border-2 shadow-xs space-y-4 animate-fade-in ${
+              nextAction.actionType === "revisit_unresolved"
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-950"
+                : nextAction.actionType === "fresh_check"
+                  ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-950"
+                  : "bg-teal-500/10 border-teal-500/30 text-teal-950"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span
+                className={`px-3 py-1 rounded-full text-2xs font-extrabold uppercase tracking-wider ${
+                  nextAction.actionType === "revisit_unresolved"
+                    ? "bg-amber-600 text-white"
+                    : nextAction.actionType === "fresh_check"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-teal-600 text-white"
+                }`}
+              >
+                {nextAction.actionType === "revisit_unresolved"
+                  ? "🛑 Action on Return: Revisit Objective"
+                  : nextAction.actionType === "fresh_check"
+                    ? "✍️ Action on Return: Fresh Check"
+                    : "🚀 Next Milestone"}
+              </span>
+              <span className="text-2xs font-bold uppercase tracking-wider opacity-80">
+                Reason: {nextAction.reasonCode}
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              <h2 className="text-lg sm:text-xl font-extrabold text-ink">{nextAction.title}</h2>
+              <p className="text-xs sm:text-sm font-medium leading-relaxed opacity-90">
+                {nextAction.description}
+              </p>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <Link
+                href={`/lesson/${nextAction.lessonId}`}
+                data-testid="next-action-button"
+                className={`px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-colors flex items-center gap-2 ${
+                  nextAction.actionType === "revisit_unresolved"
+                    ? "bg-amber-600 hover:bg-amber-700 text-white"
+                    : nextAction.actionType === "fresh_check"
+                      ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+                      : "bg-teal-600 hover:bg-teal-700 text-white"
+                }`}
+              >
+                <span>{nextAction.ctaLabel}</span>
+                <span>→</span>
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* MATHEMATICS VIEW */}
         {selectedSubject === "maths" && (

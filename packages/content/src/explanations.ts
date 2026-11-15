@@ -296,4 +296,46 @@ export const EXPLANATIONS: Readonly<Record<ConceptId, ConceptExplanation>> = {
       },
     ],
   },
+  "SCI-ELEC-CIRCUITS": {
+    conceptId: "SCI-ELEC-CIRCUITS",
+    picture: [
+      {
+        t: "text",
+        v: "Picture a circular track: battery, wire, switch, and bulb. When the switch is closed, current flows in a complete loop. An open switch leaves a gap that stops the flow.",
+      },
+    ],
+    everyday: [
+      {
+        t: "text",
+        v: "When you flick a torch switch ON, metal plates touch inside, closing the loop so the bulb glows immediately.",
+      },
+    ],
+    steps: [
+      {
+        t: "text",
+        v: "1. Follow the path from the battery positive terminal. 2. Verify the switch is closed. 3. Check that the path returns unbroken to the negative terminal.",
+      },
+    ],
+  },
+  "SCI-ELEC-CONDUCTORS": {
+    conceptId: "SCI-ELEC-CONDUCTORS",
+    picture: [
+      {
+        t: "text",
+        v: "Conducting materials have free electrons that allow electric current to pass through. Insulators lock electrons tightly in place, blocking current.",
+      },
+    ],
+    everyday: [
+      {
+        t: "text",
+        v: "Electric power cords use copper wires inside to conduct current, and plastic rubber on the outside to insulate and protect your hands.",
+      },
+    ],
+    steps: [
+      {
+        t: "text",
+        v: "1. Place the test object across the circuit gap. 2. Close the switch. 3. If the bulb glows, the material is a conductor; if dark, an insulator.",
+      },
+    ],
+  },
 };

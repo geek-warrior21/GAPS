@@ -15,6 +15,8 @@ export const ConceptIdSchema = z.enum([
   "MATH-FRAC-DIV",
   "MATH-FRAC-DEC",
   "MATH-FRAC-WORD",
+  "SCI-ELEC-CIRCUITS",
+  "SCI-ELEC-CONDUCTORS",
 ]);
 
 export const MisconceptionIdSchema = z.enum([

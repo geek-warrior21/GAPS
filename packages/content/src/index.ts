@@ -6,6 +6,7 @@ export * from "./misconceptions";
 export * from "./explanations";
 export * from "./templates";
 export * from "./lessons";
+export * from "./science";
 
 import { createRng } from "@gaps/domain";
 import type { Template } from "./types";

@@ -738,4 +738,80 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page.getByText("Lesson Concluded")).toBeVisible();
     await expect(page.getByText("+15 Sparks Added to Your Ledger")).toBeVisible();
   });
+
+  test("S16: Stopping point 'Save & Finish for Now' preserves state and shows evidence-based next action banner on Learn", async ({
+    page,
+  }) => {
+    // 1. Sign in as Ananya (has active status & consent)
+    await page.goto("/login");
+    await page.fill("#joinCode", "DEMO7A");
+    await page.fill("#username", "ananya");
+    await page.fill("#pin", "555555");
+    await page.click("button[type='submit']");
+    await expect(page).toHaveURL(/\/home/);
+
+    // 2. Navigate to Learn and launch Fractions lesson
+    await page.goto("/learn");
+    await expect(page).toHaveURL(/\/learn/);
+
+    const launchMathsBtn = page.locator("[data-testid='start-maths-lesson-button']");
+    await expect(launchMathsBtn).toBeVisible();
+    await launchMathsBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
+
+    // Step 1: Intro
+    await expect(page.getByText("Concept Introduction", { exact: true })).toBeVisible();
+    await page.click('button:has-text("Let\'s Explore")');
+
+    // Step 2: Interactive Exploration
+    await expect(page.getByText("Interactive Exploration", { exact: true })).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Activity 3: Predict & Observe -> Student makes incorrect choice
+    await expect(page.getByText("ACTIVITY 3 OF 5")).toBeVisible();
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+    const incorrectChoice = page.locator("button:has-text('4/3 (four-thirds)')");
+    await expect(incorrectChoice).toBeVisible();
+    await incorrectChoice.click();
+    await page.click("button:has-text('Test Prediction & Observe')");
+    await expect(page.getByText("Observation & Why It Happens")).toBeVisible();
+    await page.click("button:has-text('Continue to Next Activity')");
+
+    // Adaptive remediation simulation
+    await expect(page.getByText("Adaptive Support")).toBeVisible();
+    await page.click("button:has-text('Next Step')");
+
+    // Follow-up check -> Incorrect answer
+    await expect(page.getByText("Fresh Question: Parts of a Whole")).toBeVisible();
+    const wrongFreshChoice = page.locator("button:has-text('4/1 (four rotis)')");
+    await expect(wrongFreshChoice).toBeVisible();
+    await wrongFreshChoice.click();
+    await page.click("button:has-text('Submit Answer')");
+    await expect(page.getByText("Good Try — Learning Opportunity")).toBeVisible();
+    await page.click("button:has-text('Submit & Continue')");
+
+    // Stopping Point reached
+    await expect(page.getByText("Support & Reflection")).toBeVisible();
+    const saveAndFinishBtn = page.locator("button:has-text('Save & Finish for Now')");
+    await expect(saveAndFinishBtn).toBeVisible();
+    await saveAndFinishBtn.click();
+
+    // Verify redirected to Learn page
+    await expect(page).toHaveURL(/\/learn/);
+
+    // Verify Next Action recommendation banner on Learn
+    const nextActionCard = page.locator("[data-testid='next-action-card']");
+    await expect(nextActionCard).toBeVisible();
+    await expect(page.getByText("Action on Return: Revisit Objective")).toBeVisible();
+
+    // Click Next Action button to resume
+    const resumeBtn = page.locator("[data-testid='next-action-button']");
+    await expect(resumeBtn).toBeVisible();
+    await resumeBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
+
+    // Resumed back at stopping point with practice options
+    await expect(page.getByText("Support & Reflection")).toBeVisible();
+    await expect(page.getByText("Let's Pause & Review Key Ideas")).toBeVisible();
+  });
 });

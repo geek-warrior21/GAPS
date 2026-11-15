@@ -1,5 +1,16 @@
-import { type DbClient, getDb, learningSessions, createStudentRepo } from "@gaps/db";
-import { and, desc, eq } from "drizzle-orm";
+import {
+  type DbClient,
+  getDb,
+  learningSessions,
+  createStudentRepo,
+  findOrCreateItemInstance,
+  attempts,
+  itemInstances,
+  and,
+  asc,
+  desc,
+  eq,
+} from "@gaps/db";
 import {
   type CurriculumTopicsResponse,
   type LessonPlan,
@@ -7,8 +18,22 @@ import {
   type LessonRespondResponse,
   type LessonActivity,
   type ActiveBranchState,
+  type RecommendedNextAction,
 } from "@gaps/contracts";
-import { getAllCurriculumTopics, getLessonById, MATHS_FRAC_PART_LESSON } from "@gaps/content";
+import {
+  getAllCurriculumTopics,
+  getLessonById,
+  getTopicById,
+  MATHS_FRAC_PART_LESSON,
+  CURRICULUM_TOPICS,
+} from "@gaps/content";
+import {
+  type CheckedAttempt,
+  type ConceptId,
+  type BeliefState,
+  type MisconceptionId,
+  replayTransitions,
+} from "@gaps/domain";
 import { getLessonPlanner } from "./planner";
 import { generateDomainId } from "../session/engine";
 import { log } from "../log";
@@ -50,6 +75,188 @@ function resolveActiveActivity(
   }
 
   return lesson.activities[currentActivityIndex];
+}
+
+interface RecordLessonAssessmentParams {
+  db: DbClient;
+  studentRepo: ReturnType<typeof createStudentRepo>;
+  studentId: string;
+  sessionId: string;
+  clientAttemptId: string;
+  stepSeq: number;
+  lessonPlan: LessonPlan;
+  activityId: string;
+  conceptId: ConceptId;
+  questionText: string;
+  submittedAnswer: string;
+  correctAnswer: string;
+  isCorrect: boolean;
+  assistanceLevel: 0 | 1;
+}
+
+export async function recordLessonAssessment(params: RecordLessonAssessmentParams): Promise<{
+  attemptId: string;
+  isDuplicate: boolean;
+  newState: BeliefState;
+  sparksAwarded: number;
+}> {
+  const {
+    db,
+    studentRepo,
+    studentId,
+    sessionId,
+    clientAttemptId,
+    stepSeq,
+    lessonPlan,
+    activityId,
+    conceptId,
+    questionText,
+    submittedAnswer,
+    correctAnswer,
+    isCorrect,
+    assistanceLevel,
+  } = params;
+
+  // 1. Idempotency check: (sessionId, clientAttemptId)
+  const existing = await db
+    .select()
+    .from(attempts)
+    .where(and(eq(attempts.sessionId, sessionId), eq(attempts.clientAttemptId, clientAttemptId)))
+    .limit(1);
+
+  if (existing[0]) {
+    const currentBelief = await studentRepo.getConceptBelief(conceptId);
+    return {
+      attemptId: existing[0].id,
+      isDuplicate: true,
+      newState: currentBelief as unknown as BeliefState,
+      sparksAwarded: 0,
+    };
+  }
+
+  // 2. Ensure item instance in item_instances table
+  const templateId = `tpl_lesson_${lessonPlan.topicId}_${activityId}`;
+  const itemInstanceId = `itm_lesson_${lessonPlan.lessonId}_${activityId}`;
+
+  const item = await findOrCreateItemInstance(db, {
+    id: itemInstanceId,
+    templateId,
+    templateVersion: 1,
+    seed: 1,
+    conceptId,
+    prompt: { text: questionText },
+    answer: { value: correctAnswer },
+    hints: [],
+    workedExample: { steps: [], result: correctAnswer },
+  });
+
+  // 3. Record attempt into attempts table
+  const attemptId = generateDomainId("attempt");
+  await studentRepo.recordAttempt({
+    id: attemptId,
+    sessionId,
+    clientAttemptId,
+    stepSeq,
+    itemInstanceId: item.id,
+    conceptId,
+    rawAnswer: submittedAnswer.slice(0, 64),
+    parsed: { kind: "choice", value: submittedAnswer, lowestTerms: true },
+    outcome: isCorrect ? "correct" : "incorrect",
+    assistanceLevel,
+    tryNo: 1,
+    isReview: false,
+    mode: "lesson",
+    verifierVersion: "verify-1.0",
+    latencyMs: 1000,
+  });
+
+  // 4. Fetch all stored attempts for this concept, joined with itemInstances
+  const storedAttempts = await db
+    .select({
+      attemptId: attempts.id,
+      studentId: attempts.studentId,
+      sessionId: attempts.sessionId,
+      clientAttemptId: attempts.clientAttemptId,
+      itemInstanceId: attempts.itemInstanceId,
+      templateId: itemInstances.templateId,
+      conceptId: attempts.conceptId,
+      mode: attempts.mode,
+      outcome: attempts.outcome,
+      misconceptionId: attempts.misconceptionId,
+      assistance: attempts.assistanceLevel,
+      tryNo: attempts.tryNo,
+      isReview: attempts.isReview,
+      verifierVersion: attempts.verifierVersion,
+      at: attempts.createdAt,
+    })
+    .from(attempts)
+    .innerJoin(itemInstances, eq(attempts.itemInstanceId, itemInstances.id))
+    .where(and(eq(attempts.studentId, studentId), eq(attempts.conceptId, conceptId)))
+    .orderBy(asc(attempts.createdAt), asc(attempts.id));
+
+  const checkedAttempts: CheckedAttempt[] = storedAttempts.map((row) => ({
+    attemptId: row.attemptId,
+    studentId: row.studentId,
+    sessionId: row.sessionId,
+    clientAttemptId: row.clientAttemptId,
+    itemInstanceId: row.itemInstanceId,
+    templateId: row.templateId,
+    conceptId: row.conceptId as ConceptId,
+    mode: row.mode as CheckedAttempt["mode"],
+    outcome: row.outcome as CheckedAttempt["outcome"],
+    misconceptionId: row.misconceptionId ? (row.misconceptionId as MisconceptionId) : undefined,
+    assistance: (row.assistance >= 0 && row.assistance <= 3 ? row.assistance : 0) as 0 | 1 | 2 | 3,
+    tryNo: (row.tryNo === 1 || row.tryNo === 2 ? row.tryNo : 1) as 1 | 2,
+    isReview: row.isReview,
+    verifierVersion: "verify-1.0",
+    at: row.at.toISOString(),
+  }));
+
+  // 5. Replay authoritative transitions
+  const transitionHistory = replayTransitions(conceptId, checkedAttempts, {
+    templatesForConcept: 2,
+  });
+  const newState = transitionHistory.state;
+
+  // 6. Persist updated concept belief
+  const existingBelief = await studentRepo.getConceptBelief(conceptId);
+
+  await studentRepo.upsertConceptBelief({
+    studentId,
+    conceptId,
+    status: newState.status,
+    estimate: newState.estimate ? String(newState.estimate) : null,
+    reliability: newState.reliability,
+    demonstratedAt: newState.demonstratedAt ? new Date(newState.demonstratedAt) : null,
+    retainedAt: newState.retainedAt ? new Date(newState.retainedAt) : null,
+    firstNeedsSupportAt: newState.firstNeedsSupportAt
+      ? new Date(newState.firstNeedsSupportAt)
+      : null,
+    lastEvidenceAt: new Date(),
+    activeMisconceptionIds: [...newState.activeMisconceptionIds],
+    independentN: checkedAttempts.filter((a) => a.assistance === 0).length,
+    independentCorrectN: checkedAttempts.filter(
+      (a) => a.assistance === 0 && a.outcome === "correct",
+    ).length,
+  });
+
+  // 7. Check Sparks rewards: +20 for newly demonstrated mastery
+  let sparksAwarded = 0;
+  if (
+    newState.status === "demonstrated" &&
+    existingBelief?.status !== "demonstrated" &&
+    existingBelief?.status !== "retained"
+  ) {
+    const spk = await studentRepo.awardSparks(attemptId, "mastery_demonstrated", 20);
+    if (spk.awarded) sparksAwarded += 20;
+  }
+
+  return {
+    attemptId,
+    isDuplicate: false,
+    newState,
+    sparksAwarded,
+  };
 }
 
 export async function getCurriculumTopicsOverview(): Promise<CurriculumTopicsResponse> {
@@ -168,10 +375,13 @@ export async function startOrResumeLessonSession(
     startedAt: new Date().toISOString(),
   };
 
+  const topic = getTopicById(lesson.topicId);
+  const focusConceptId = (topic?.conceptId as ConceptId) ?? null;
+
   const createdSession = await studentRepo.createSession({
     id: sessionId,
     mode: "lesson",
-    focusConceptId: null,
+    focusConceptId,
     status: "active",
     budgetS: 1200,
     stepSeq: 0,
@@ -215,24 +425,25 @@ export async function submitLessonActivityResponse(
 ): Promise<LessonRespondResponse> {
   const studentRepo = createStudentRepo(studentId, db);
 
-  // 1. Locate active session
+  // 1. Locate active session (or completed session for idempotent retries)
   const existingSessions = await db
     .select()
     .from(learningSessions)
-    .where(
-      and(
-        eq(learningSessions.studentId, studentId),
-        eq(learningSessions.mode, "lesson"),
-        eq(learningSessions.status, "active"),
-      ),
-    )
+    .where(and(eq(learningSessions.studentId, studentId), eq(learningSessions.mode, "lesson")))
     .orderBy(desc(learningSessions.startedAt))
     .limit(5);
 
-  const session = existingSessions.find((s) => {
+  let session = existingSessions.find((s) => {
     const c = s.counters as Record<string, unknown> | null;
-    return c?.lessonId === lessonId;
+    return c?.lessonId === lessonId && s.status === "active";
   });
+
+  if (!session) {
+    session = existingSessions.find((s) => {
+      const c = s.counters as Record<string, unknown> | null;
+      return c?.lessonId === lessonId && s.status === "completed";
+    });
+  }
 
   if (!session) {
     throw new LessonServiceError(
@@ -250,6 +461,20 @@ export async function submitLessonActivityResponse(
   const completedActivities = Array.isArray(counters.completedActivities)
     ? [...(counters.completedActivities as string[])]
     : [];
+
+  // Idempotent retry on an already completed session
+  if (session.status === "completed" && completedActivities.includes(activityId)) {
+    return {
+      activityId,
+      accepted: true,
+      feedback: "Activity already completed.",
+      isCorrect: true,
+      nextActivityIndex: currentActivityIndex,
+      activeBranch: null,
+      isCompleted: true,
+      sparksAwarded: 0,
+    };
+  }
   const activityResponses =
     typeof counters.activityResponses === "object" && counters.activityResponses !== null
       ? { ...(counters.activityResponses as Record<string, unknown>) }
@@ -339,6 +564,7 @@ export async function submitLessonActivityResponse(
           correctAnswer: string;
           explanation: string;
           conceptId?: string;
+          prompt?: string;
         };
 
         const submittedAnswer =
@@ -353,6 +579,32 @@ export async function submitLessonActivityResponse(
         const isFollowUpCorrect =
           submittedAnswer.trim().toLowerCase() === checkConfig.correctAnswer.trim().toLowerCase();
 
+        const conceptId = (checkConfig.conceptId ??
+          getTopicById(lessonPlan.topicId)?.conceptId ??
+          "MATH-FRAC-PART") as ConceptId;
+
+        const clientAttemptId =
+          (typeof response === "object" && response !== null && "clientAttemptId" in response
+            ? String((response as { clientAttemptId: unknown }).clientAttemptId)
+            : null) ?? `att_${session.id}_${activityId}`;
+
+        const assessResult = await recordLessonAssessment({
+          db,
+          studentRepo,
+          studentId,
+          sessionId: session.id,
+          clientAttemptId,
+          stepSeq: session.stepSeq,
+          lessonPlan,
+          activityId,
+          conceptId,
+          questionText: checkConfig.prompt ?? remediation.followUpCheck.title,
+          submittedAnswer,
+          correctAnswer: checkConfig.correctAnswer,
+          isCorrect: isFollowUpCorrect,
+          assistanceLevel: 1, // Supported learning: check taken immediately following remediation
+        });
+
         await studentRepo.recordEvent({
           sessionId: session.id,
           type: "lesson_remediation_check",
@@ -360,9 +612,10 @@ export async function submitLessonActivityResponse(
             lessonId,
             parentActivityId: parentActivity.id,
             activityId,
-            conceptId: checkConfig.conceptId,
+            conceptId,
             submittedAnswer,
             isCorrect: isFollowUpCorrect,
+            attemptId: assessResult.attemptId,
           },
         });
 
@@ -478,7 +731,7 @@ export async function submitLessonActivityResponse(
         }
       }
 
-      // Stage 3: Stopping Point Acknowledged
+      // Stage 3: Stopping Point Acknowledged or Saved
       if (activeBranch.stage === "stopping_point") {
         if (activityId !== remediation.stoppingPoint?.id) {
           throw new LessonServiceError(
@@ -488,16 +741,51 @@ export async function submitLessonActivityResponse(
           );
         }
 
+        const isSaveAndExit =
+          typeof response === "object" &&
+          response !== null &&
+          Boolean((response as { saveAndExit?: boolean }).saveAndExit);
+
         await studentRepo.recordEvent({
           sessionId: session.id,
-          type: "lesson_stopping_point_acknowledged",
+          type: isSaveAndExit
+            ? "lesson_stopping_point_saved"
+            : "lesson_stopping_point_acknowledged",
           payload: {
             lessonId,
             parentActivityId: parentActivity.id,
             activityId,
             response,
+            saveAndExit: isSaveAndExit,
           },
         });
+
+        if (isSaveAndExit) {
+          await studentRepo.updateSession(session.id, {
+            counters: {
+              ...counters,
+              stoppingPointSaved: true,
+              savedAt: new Date().toISOString(),
+              activeBranch,
+              activityResponses: {
+                ...activityResponses,
+                [activityId]: response,
+              },
+            },
+          });
+
+          return {
+            activityId,
+            accepted: true,
+            feedback: "Progress saved. You can take a break and resume anytime!",
+            activeBranch,
+            activeActivity: remediation.stoppingPoint,
+            nextActivityIndex: currentActivityIndex,
+            isCompleted: false,
+            isSavedAndExited: true,
+            sparksAwarded: 0,
+          };
+        }
 
         if (!completedActivities.includes(parentActivity.id)) {
           completedActivities.push(parentActivity.id);
@@ -659,6 +947,7 @@ export async function submitLessonActivityResponse(
       conceptId?: string;
       correctAnswer: string;
       explanation: string;
+      prompt?: string;
     };
 
     const submittedAnswer =
@@ -666,10 +955,38 @@ export async function submitLessonActivityResponse(
         ? response
         : typeof response === "object" && response !== null && "answer" in response
           ? String((response as { answer: unknown }).answer)
-          : "";
+          : typeof response === "object" && response !== null && "choiceId" in response
+            ? String((response as { choiceId: unknown }).choiceId)
+            : "";
 
-    isCorrect = submittedAnswer === config.correctAnswer;
+    isCorrect = submittedAnswer.trim().toLowerCase() === config.correctAnswer.trim().toLowerCase();
     feedback = config.explanation;
+
+    const conceptId = (config.conceptId ??
+      getTopicById(lessonPlan.topicId)?.conceptId ??
+      "MATH-FRAC-PART") as ConceptId;
+
+    const clientAttemptId =
+      (typeof response === "object" && response !== null && "clientAttemptId" in response
+        ? String((response as { clientAttemptId: unknown }).clientAttemptId)
+        : null) ?? `att_${session.id}_${activityId}`;
+
+    const assessResult = await recordLessonAssessment({
+      db,
+      studentRepo,
+      studentId,
+      sessionId: session.id,
+      clientAttemptId,
+      stepSeq: session.stepSeq,
+      lessonPlan,
+      activityId,
+      conceptId,
+      questionText: config.prompt ?? currentActivity.title,
+      submittedAnswer,
+      correctAnswer: config.correctAnswer,
+      isCorrect,
+      assistanceLevel: 0, // Independent assessment
+    });
 
     await studentRepo.recordEvent({
       sessionId: session.id,
@@ -677,9 +994,11 @@ export async function submitLessonActivityResponse(
       payload: {
         lessonId,
         activityId,
-        conceptId: config.conceptId,
+        conceptId,
         submittedAnswer,
         isCorrect,
+        assistanceLevel: 0,
+        attemptId: assessResult.attemptId,
       },
     });
   }
@@ -796,5 +1115,138 @@ export async function submitLessonActivityResponse(
     activeActivity: lessonPlan.activities[nextActivityIndex],
     isCompleted: isFinalActivity,
     sparksAwarded,
+  };
+}
+
+export async function getRecommendedNextAction(
+  studentId: string,
+  subject?: "maths" | "science",
+  db: DbClient = getDb(),
+): Promise<RecommendedNextAction> {
+  const studentRepo = createStudentRepo(studentId, db);
+  const beliefs = await studentRepo.getConceptBeliefs();
+  const beliefMap = new Map(beliefs.map((b) => [b.conceptId, b]));
+
+  // Find active lesson sessions
+  const activeSessions = await db
+    .select()
+    .from(learningSessions)
+    .where(
+      and(
+        eq(learningSessions.studentId, studentId),
+        eq(learningSessions.mode, "lesson"),
+        eq(learningSessions.status, "active"),
+      ),
+    )
+    .orderBy(desc(learningSessions.startedAt));
+
+  // Determine candidate topics based on subject filter
+  const candidateTopics = subject
+    ? CURRICULUM_TOPICS.filter((t) => t.subject === subject)
+    : CURRICULUM_TOPICS;
+
+  // RULE 1: Check for stopping point saved or concept belief 'needs_support'
+  // (Revisit an unresolved objective)
+  for (const topic of candidateTopics) {
+    if (!topic.conceptId) continue;
+    const belief = beliefMap.get(topic.conceptId);
+    const session = activeSessions.find((s) => {
+      const c = s.counters as Record<string, unknown> | null;
+      return c?.topicId === topic.id || c?.lessonId === topic.defaultLessonId;
+    });
+    const counters = (session?.counters as Record<string, unknown>) ?? {};
+    const hasStoppingPoint =
+      Boolean(counters.stoppingPointSaved) ||
+      (counters.activeBranch as ActiveBranchState | null)?.stage === "stopping_point";
+
+    if (hasStoppingPoint || belief?.status === "needs_support") {
+      return {
+        actionType: "revisit_unresolved",
+        title: `Revisit: ${topic.studentTitle}`,
+        description: `You hit a tricky spot earlier. Let's revisit this objective together with step-by-step guidance.`,
+        objectiveId: topic.conceptId as ConceptId,
+        objectiveTitle: topic.studentTitle,
+        subject: topic.subject,
+        lessonId: topic.defaultLessonId,
+        ctaLabel: "Revisit Objective",
+        reasonCode: hasStoppingPoint ? "SAVED_AT_STOPPING_POINT" : "STATUS_NEEDS_SUPPORT",
+      };
+    }
+  }
+
+  // RULE 2: Check for supported learning / assisted check without independent mastery
+  // (Attempt a fresh independent check)
+  for (const topic of candidateTopics) {
+    if (!topic.conceptId) continue;
+    const belief = beliefMap.get(topic.conceptId);
+    const session = activeSessions.find((s) => {
+      const c = s.counters as Record<string, unknown> | null;
+      return c?.topicId === topic.id || c?.lessonId === topic.defaultLessonId;
+    });
+    const counters = (session?.counters as Record<string, unknown>) ?? {};
+    const assistanceStatus = (counters.assistanceStatus as Record<string, string>) ?? {};
+    const hadAssistance = Object.values(assistanceStatus).some(
+      (st) => st === "remediated" || st === "assisted",
+    );
+
+    const isMastered = belief?.status === "demonstrated" || belief?.status === "retained";
+    if (
+      !isMastered &&
+      (hadAssistance ||
+        (belief && belief.independentCorrectN === 0 && (belief.independentN ?? 0) > 0))
+    ) {
+      return {
+        actionType: "fresh_check",
+        title: `Fresh Check: ${topic.studentTitle}`,
+        description: `You practiced with support! Ready to prove your understanding independently?`,
+        objectiveId: topic.conceptId as ConceptId,
+        objectiveTitle: topic.studentTitle,
+        subject: topic.subject,
+        lessonId: topic.defaultLessonId,
+        ctaLabel: "Take Independent Check",
+        reasonCode: "ASSISTED_PRACTICE_NEEDS_FRESH_CHECK",
+      };
+    }
+  }
+
+  // RULE 3: Check for demonstrated / retained concepts
+  // (Continue to the next eligible objective)
+  for (let i = 0; i < candidateTopics.length; i++) {
+    const topic = candidateTopics[i]!;
+    if (!topic.conceptId) continue;
+    const belief = beliefMap.get(topic.conceptId);
+    const isMastered = belief?.status === "demonstrated" || belief?.status === "retained";
+
+    if (isMastered) {
+      // Find the next topic in the same subject
+      const nextTopic = candidateTopics.slice(i + 1).find((t) => t.subject === topic.subject);
+      if (nextTopic && nextTopic.conceptId) {
+        return {
+          actionType: "continue_next_objective",
+          title: `Next Objective: ${nextTopic.studentTitle}`,
+          description: `You demonstrated understanding of ${topic.studentTitle}! Continue to ${nextTopic.studentTitle}.`,
+          objectiveId: nextTopic.conceptId as ConceptId,
+          objectiveTitle: nextTopic.studentTitle,
+          subject: nextTopic.subject,
+          lessonId: nextTopic.defaultLessonId,
+          ctaLabel: "Start Next Objective",
+          reasonCode: "CURRENT_OBJECTIVE_MASTERED",
+        };
+      }
+    }
+  }
+
+  // RULE 4: Default start objective
+  const firstTopic = candidateTopics[0] ?? CURRICULUM_TOPICS[0]!;
+  return {
+    actionType: "start_objective",
+    title: `Start: ${firstTopic.studentTitle}`,
+    description: firstTopic.description,
+    objectiveId: (firstTopic.conceptId ?? "MATH-FRAC-PART") as ConceptId,
+    objectiveTitle: firstTopic.studentTitle,
+    subject: firstTopic.subject,
+    lessonId: firstTopic.defaultLessonId,
+    ctaLabel: "Start Learning",
+    reasonCode: "DEFAULT_START",
   };
 }

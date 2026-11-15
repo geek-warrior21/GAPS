@@ -35,15 +35,15 @@ export interface Template<P = unknown> {
 }
 
 export interface ChapterDefinition {
-  readonly id: "A" | "B" | "C";
-  readonly strand: "fractions";
+  readonly id: string;
+  readonly strand: string;
   readonly title: string;
   readonly ord: number;
 }
 
 export interface ConceptDefinition {
   readonly id: ConceptId;
-  readonly chapterId: "A" | "B" | "C";
+  readonly chapterId: string;
   readonly title: string;
   readonly studentTitle: string;
   readonly description: string;

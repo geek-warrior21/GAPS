@@ -112,6 +112,7 @@ export const MATHS_FRAC_PART_LESSON: LessonPlan = {
           instructions: "Demonstrate your understanding with this fresh question.",
           config: {
             type: "independent_check",
+            conceptId: "MATH-FRAC-PART",
             prompt:
               "A round roti is divided into 4 equal quarters. Meera eats 1 quarter. What fraction of the roti did Meera eat?",
             questionType: "choice",

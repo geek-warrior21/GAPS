@@ -245,6 +245,25 @@ export const LessonRespondResponseSchema = z.object({
   activeBranch: ActiveBranchStateSchema.nullable().optional(),
   activeActivity: LessonActivitySchema.optional(),
   isCompleted: z.boolean(),
+  isSavedAndExited: z.boolean().optional(),
   sparksAwarded: z.number(),
 });
 export type LessonRespondResponse = z.infer<typeof LessonRespondResponseSchema>;
+
+export const RecommendedNextActionSchema = z.object({
+  actionType: z.enum([
+    "revisit_unresolved",
+    "fresh_check",
+    "continue_next_objective",
+    "start_objective",
+  ]),
+  title: z.string(),
+  description: z.string(),
+  objectiveId: z.string(),
+  objectiveTitle: z.string(),
+  subject: SubjectIdSchema,
+  lessonId: z.string(),
+  ctaLabel: z.string(),
+  reasonCode: z.string(),
+});
+export type RecommendedNextAction = z.infer<typeof RecommendedNextActionSchema>;

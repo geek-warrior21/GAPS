@@ -16,6 +16,8 @@ export const CONCEPT_IDS = [
   "MATH-FRAC-DIV",
   "MATH-FRAC-DEC",
   "MATH-FRAC-WORD",
+  "SCI-ELEC-CIRCUITS",
+  "SCI-ELEC-CONDUCTORS",
 ] as const;
 
 export type ConceptId = (typeof CONCEPT_IDS)[number];

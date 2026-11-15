@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { CHAPTERS, CONCEPTS, EDGES, MISCONCEPTIONS, TEMPLATES } from "@gaps/content";
+import {
+  CHAPTERS,
+  CONCEPTS,
+  EDGES,
+  MISCONCEPTIONS,
+  SCIENCE_CHAPTERS,
+  SCIENCE_CONCEPTS,
+  TEMPLATES,
+} from "@gaps/content";
 import { getDb, type DbClient } from "./client";
 import { chapters, conceptEdges, concepts, misconceptions, templates } from "./schema";
 
@@ -14,8 +22,9 @@ export async function syncContent(db: DbClient = getDb()): Promise<{
   misconceptionsCount: number;
   templatesCount: number;
 }> {
-  // 1. Chapters
-  for (const c of CHAPTERS) {
+  // 1. Chapters (Maths + Science)
+  const allChapters = [...CHAPTERS, ...SCIENCE_CHAPTERS];
+  for (const c of allChapters) {
     await db
       .insert(chapters)
       .values({
@@ -34,8 +43,9 @@ export async function syncContent(db: DbClient = getDb()): Promise<{
       });
   }
 
-  // 2. Concepts
-  for (const c of CONCEPTS) {
+  // 2. Concepts (Maths + Science)
+  const allConcepts = [...CONCEPTS, ...SCIENCE_CONCEPTS];
+  for (const c of allConcepts) {
     await db
       .insert(concepts)
       .values({

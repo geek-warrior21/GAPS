@@ -43,6 +43,11 @@ export function LessonPlayer({ initialData }: LessonPlayerProps) {
 
       const result: LessonRespondResponse = await res.json();
 
+      if (result.isSavedAndExited) {
+        router.push("/learn");
+        return;
+      }
+
       setSessionData((prev) => ({
         ...prev,
         currentActivityIndex: result.nextActivityIndex,

@@ -588,12 +588,20 @@ export function LessonActivityRenderer({
             <p className="text-xs sm:text-sm font-bold text-ink">{config.recommendation}</p>
           </div>
 
-          <div className="pt-4 flex justify-end">
+          <div className="pt-4 flex flex-col sm:flex-row items-center justify-end gap-3">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => onRespond({ acknowledged: true, saveAndExit: true })}
+              className="w-full sm:w-auto px-6 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-sm font-bold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Save & Finish for Now
+            </button>
             <button
               type="button"
               disabled={isSubmitting}
               onClick={() => onRespond({ acknowledged: true })}
-              className="px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full sm:w-auto px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <span>{isSubmitting ? "Proceeding..." : "Acknowledge & Continue"}</span>
               <span>→</span>

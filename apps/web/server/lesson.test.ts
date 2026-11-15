@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { getDb, users, hashPin, events, conceptBeliefs, eq } from "@gaps/db";
+import {
+  getDb,
+  users,
+  hashPin,
+  events,
+  conceptBeliefs,
+  attempts,
+  createStudentRepo,
+  and,
+  eq,
+} from "@gaps/db";
 import {
   getCurriculumTopicsOverview,
   startOrResumeLessonSession,
   getLessonSession,
   submitLessonActivityResponse,
+  getRecommendedNextAction,
+  recordLessonAssessment,
 } from "./lesson/service";
 import { AuthoredLessonPlanner, LlmLessonPlanner } from "./lesson/planner";
 import { MATHS_FRAC_PART_LESSON, SCI_CIRCUITS_LESSON, SCI_CONDUCTORS_LESSON } from "@gaps/content";
@@ -702,5 +714,415 @@ describe("Dynamic Teaching Vertical Slice (Maths & Science)", () => {
     // Either no belief entry exists or belief is NOT "mastered"
     const fracBelief = beliefs.find((b) => b.conceptId === "MATH-FRAC-PART");
     expect(fracBelief?.status ?? "unassessed").not.toBe("mastered");
+  });
+
+  it("12. Struggling student reaches stopping point, clicks 'Save and finish for now', and receives follow-up action on return", async () => {
+    const studentId = `stu_lesson_struggle_save_${Date.now()}`;
+    await createTestStudent(studentId, `struggle_save_${Date.now()}`);
+
+    // Start science circuits lesson
+    await startOrResumeLessonSession(studentId, SCI_CIRCUITS_LESSON.lessonId, db);
+
+    // Step 1: Intro
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_1_intro",
+      { read: true },
+      db,
+    );
+    // Step 2: Sandbox
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_2_manipulation",
+      { switch: "open" },
+      db,
+    );
+    // Step 3: Incorrect prediction -> triggers remediation
+    const predRes = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_3_predict",
+      { choiceId: "choice_glow" },
+      db,
+    );
+    expect(predRes.activeBranch?.stage).toBe("remediation_activity");
+
+    // Remediation simulation
+    const remSimRes = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_3_remediation_sim",
+      { observedGap: true },
+      db,
+    );
+    expect(remSimRes.activeBranch?.stage).toBe("followup_check");
+
+    // Continued difficulty on fresh follow-up check -> triggers stopping point
+    const freshCheckRes = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_3_remediation_fresh_check",
+      { choiceId: "fresh_wire_glow" }, // Incorrect
+      db,
+    );
+    expect(freshCheckRes.activeBranch?.stage).toBe("stopping_point");
+
+    // Student clicks "Save and finish for now"
+    const saveRes = await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_3_stopping_point",
+      { acknowledged: true, saveAndExit: true },
+      db,
+    );
+    expect(saveRes.accepted).toBe(true);
+    expect(saveRes.isSavedAndExited).toBe(true);
+
+    // Student returns to app: next action on return advises revisiting unresolved objective
+    const nextAction = await getRecommendedNextAction(studentId, "science", db);
+    expect(nextAction.actionType).toBe("revisit_unresolved");
+    expect(nextAction.objectiveId).toBe("SCI-ELEC-CIRCUITS");
+    expect(nextAction.reasonCode).toBe("SAVED_AT_STOPPING_POINT");
+    expect(nextAction.ctaLabel).toBe("Revisit Objective");
+
+    // Student resumes session: reliably loads stopping point state
+    const resumed = await getLessonSession(studentId, SCI_CIRCUITS_LESSON.lessonId, db);
+    expect(resumed.activeBranch?.stage).toBe("stopping_point");
+    expect(resumed.activeActivity?.id).toBe("act_3_stopping_point");
+  });
+
+  it("13. Supported success in remediation does not establish mastery (Invariant 2 & SPEC §9)", async () => {
+    const studentId = `stu_lesson_supported_${Date.now()}`;
+    await createTestStudent(studentId, `supported_${Date.now()}`);
+
+    // Start fractions lesson
+    await startOrResumeLessonSession(studentId, MATHS_FRAC_PART_LESSON.lessonId, db);
+
+    // Intro & Sandbox
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_1_intro",
+      { read: true },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_2_manipulation",
+      { parts: 4 },
+      db,
+    );
+
+    // Step 3: Incorrect prediction -> triggers remediation
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_3_predict",
+      { choiceId: "choice_4_3" }, // Incorrect
+      db,
+    );
+
+    // Explore remediation simulation
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_3_remediation_sim",
+      { explored: true },
+      db,
+    );
+
+    // Student answers fresh question correctly AFTER help
+    const freshRes = await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_3_remediation_fresh_check",
+      { choiceId: "fresh_1_4" }, // Correct answer
+      db,
+    );
+    expect(freshRes.isCorrect).toBe(true);
+
+    // 1. Verify in attempts table: assistanceLevel is 1 (supported learning)
+    const storedAttempts = await db
+      .select()
+      .from(attempts)
+      .where(and(eq(attempts.studentId, studentId), eq(attempts.conceptId, "MATH-FRAC-PART")));
+
+    expect(storedAttempts.length).toBeGreaterThanOrEqual(1);
+    const remediationAttempt = storedAttempts.find((a) => a.assistanceLevel === 1);
+    expect(remediationAttempt).toBeDefined();
+    expect(remediationAttempt?.outcome).toBe("correct");
+
+    // 2. Invariant 2: Supported attempt NEVER establishes demonstrated mastery
+    const belief = await db
+      .select()
+      .from(conceptBeliefs)
+      .where(
+        and(
+          eq(conceptBeliefs.studentId, studentId),
+          eq(conceptBeliefs.conceptId, "MATH-FRAC-PART"),
+        ),
+      );
+
+    expect(belief[0]?.status).not.toBe("demonstrated");
+    expect(belief[0]?.demonstratedAt).toBeNull();
+    // Independent counts must be 0 because this was an assisted attempt
+    expect(belief[0]?.independentN).toBe(0);
+
+    // 3. Recommended next action advises taking a fresh independent check
+    const nextAction = await getRecommendedNextAction(studentId, "maths", db);
+    expect(nextAction.actionType).toBe("fresh_check");
+    expect(nextAction.objectiveId).toBe("MATH-FRAC-PART");
+    expect(nextAction.ctaLabel).toBe("Take Independent Check");
+  });
+
+  it("14. Sufficient eligible independent evidence updates progress per policy (Demonstrated mastery)", async () => {
+    const studentId = `stu_lesson_mastery_${Date.now()}`;
+    await createTestStudent(studentId, `mastery_${Date.now()}`);
+
+    const sessionRes = await startOrResumeLessonSession(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      db,
+    );
+    const sessionId = sessionRes.session.id;
+    const studentRepo = createStudentRepo(studentId, db);
+
+    // Simulate 3 independent correct checks meeting SPEC §9 policy rule:
+    // okL4 >= 3, l2 all correct, distinct itemInstanceIds >= 3, distinct templateIds >= 2, assistance = 0
+    const attempt1 = await recordLessonAssessment({
+      db,
+      studentRepo,
+      studentId,
+      sessionId,
+      clientAttemptId: `client_att_ind_1_${Date.now()}`,
+      stepSeq: 1,
+      lessonPlan: MATHS_FRAC_PART_LESSON,
+      activityId: "act_5_check_v1",
+      conceptId: "MATH-FRAC-PART",
+      questionText: "Question 1 on template A",
+      submittedAnswer: "choice_a",
+      correctAnswer: "choice_a",
+      isCorrect: true,
+      assistanceLevel: 0,
+    });
+    expect(attempt1.newState.status).toBe("developing");
+
+    const attempt2 = await recordLessonAssessment({
+      db,
+      studentRepo,
+      studentId,
+      sessionId,
+      clientAttemptId: `client_att_ind_2_${Date.now()}`,
+      stepSeq: 2,
+      lessonPlan: MATHS_FRAC_PART_LESSON,
+      activityId: "act_5_check_v2", // Distinct template & item
+      conceptId: "MATH-FRAC-PART",
+      questionText: "Question 2 on template B",
+      submittedAnswer: "choice_b",
+      correctAnswer: "choice_b",
+      isCorrect: true,
+      assistanceLevel: 0,
+    });
+    expect(attempt2.newState.status).toBe("developing");
+
+    // Third independent correct check on distinct item
+    const attempt3 = await recordLessonAssessment({
+      db,
+      studentRepo,
+      studentId,
+      sessionId,
+      clientAttemptId: `client_att_ind_3_${Date.now()}`,
+      stepSeq: 3,
+      lessonPlan: MATHS_FRAC_PART_LESSON,
+      activityId: "act_5_check_v3", // Distinct item
+      conceptId: "MATH-FRAC-PART",
+      questionText: "Question 3 on template B",
+      submittedAnswer: "choice_c",
+      correctAnswer: "choice_c",
+      isCorrect: true,
+      assistanceLevel: 0,
+    });
+
+    // 3 independent correct answers across 2 templates & 3 items -> demonstrated!
+    expect(attempt3.newState.status).toBe("demonstrated");
+    expect(attempt3.newState.demonstratedAt).toBeTruthy();
+    expect(attempt3.sparksAwarded).toBe(20); // +20 mastery Sparks awarded
+
+    // Recommended next action now advances to next eligible objective
+    const nextAction = await getRecommendedNextAction(studentId, "maths", db);
+    expect(nextAction.actionType).toBe("continue_next_objective");
+    expect(nextAction.objectiveId).toBe("MATH-FRAC-EQUIV");
+    expect(nextAction.ctaLabel).toBe("Start Next Objective");
+  });
+
+  it("15. Duplicate submissions do not double-count (idempotency key preservation)", async () => {
+    const studentId = `stu_lesson_duplicate_${Date.now()}`;
+    await createTestStudent(studentId, `dup_${Date.now()}`);
+
+    await startOrResumeLessonSession(studentId, MATHS_FRAC_PART_LESSON.lessonId, db);
+    const clientAttemptId = `att_fixed_idempotency_${Date.now()}`;
+
+    // Advance to act_5_check
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_1_intro",
+      { read: true },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_2_manipulation",
+      { parts: 4 },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_3_predict",
+      { choiceId: "choice_3_4" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_4_guided",
+      { value: "2/5" },
+      db,
+    );
+
+    // First submission
+    const res1 = await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_5_check",
+      { answer: "choice_a", clientAttemptId },
+      db,
+    );
+    expect(res1.accepted).toBe(true);
+
+    const initialAttempts = await db
+      .select()
+      .from(attempts)
+      .where(and(eq(attempts.studentId, studentId), eq(attempts.clientAttemptId, clientAttemptId)));
+    expect(initialAttempts.length).toBe(1);
+
+    // Duplicate submission with same clientAttemptId
+    const res2 = await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_5_check",
+      { answer: "choice_a", clientAttemptId },
+      db,
+    );
+    expect(res2.accepted).toBe(true);
+
+    const finalAttempts = await db
+      .select()
+      .from(attempts)
+      .where(and(eq(attempts.studentId, studentId), eq(attempts.clientAttemptId, clientAttemptId)));
+    expect(finalAttempts.length).toBe(1); // Still exactly 1 attempt, no duplicate
+  });
+
+  it("16. Both subjects (Mathematics and Science) work through the shared learner model system", async () => {
+    const studentId = `stu_lesson_both_subj_${Date.now()}`;
+    await createTestStudent(studentId, `both_${Date.now()}`);
+
+    // Complete lesson for Maths (Parts of a Whole)
+    await startOrResumeLessonSession(studentId, MATHS_FRAC_PART_LESSON.lessonId, db);
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_1_intro",
+      { read: true },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_2_manipulation",
+      { parts: 4 },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_3_predict",
+      { choiceId: "choice_3_4" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_4_guided",
+      { value: "2/5" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      MATHS_FRAC_PART_LESSON.lessonId,
+      "act_5_check",
+      { answer: "choice_a" },
+      db,
+    );
+
+    // Complete lesson for Science (Simple Circuits)
+    await startOrResumeLessonSession(studentId, SCI_CIRCUITS_LESSON.lessonId, db);
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_1_intro",
+      { read: true },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_2_manipulation",
+      { switch: "closed" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_3_predict",
+      { choiceId: "choice_dark" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_4_guided",
+      { value: "closed" },
+      db,
+    );
+    await submitLessonActivityResponse(
+      studentId,
+      SCI_CIRCUITS_LESSON.lessonId,
+      "act_5_check",
+      { answer: "choice_a" },
+      db,
+    );
+
+    // Verify both concept beliefs exist and are tracked in concept_beliefs table
+    const beliefs = await db
+      .select()
+      .from(conceptBeliefs)
+      .where(eq(conceptBeliefs.studentId, studentId));
+
+    const mathBelief = beliefs.find((b) => b.conceptId === "MATH-FRAC-PART");
+    const sciBelief = beliefs.find((b) => b.conceptId === "SCI-ELEC-CIRCUITS");
+
+    expect(mathBelief).toBeDefined();
+    expect(mathBelief?.status).toBe("developing");
+    expect(mathBelief?.independentN).toBe(1);
+
+    expect(sciBelief).toBeDefined();
+    expect(sciBelief?.status).toBe("developing");
+    expect(sciBelief?.independentN).toBe(1);
   });
 });
