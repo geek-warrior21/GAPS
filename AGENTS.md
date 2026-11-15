@@ -1,12 +1,26 @@
 # AGENTS.md — Gaps V0.1
 
-You are building Gaps V0.1, an adaptive maths learning web app for Class 6–8 students
-in Indian pilot schools. The full specification is docs/SPEC.md. Read all of it first.
+You are building Gaps, a dynamic teaching system for Class 6–8 maths and science.
+The current demonstration content is Class 6 fractions and circuits. The full
+specification is docs/SPEC.md; Appendix F supersedes the original maths-only scope.
+Read the specification before implementing product changes.
 Spec precedence when sections disagree:
-  invariants + safety (§10, §12)  >  build specs (§14–27)  >  design (§7–13)  >  narrative (§1–6)
+invariants + safety (§10, §12) > build specs (§14–27) > design (§7–13) > narrative (§1–6)
+
+## Agent coordination
+
+Before editing at every session start or after a handoff, read
+[the handoff](docs/AGENT_HANDOFF.md) and follow
+[the coordination workflow](docs/AGENT_WORKFLOW.md). Verify the actual Git state
+against the handoff before claiming ownership. Gem and Clau take turns; Gyan
+chooses the active agent. Git transfers committed code and notes, not chat memory.
+Update the handoff before yielding, including incomplete work and failed checks.
+Existing no-push/no-deploy instructions remain in force until Gyan changes them.
 
 ## Commands (phased commit gates)
+
 Every commit requires `pnpm verify` and all checks applicable to implemented functionality:
+
 - Phase 0 onward: `pnpm install`, `pnpm verify` (typecheck, lint, format:check, tests, build), `pnpm db:up` + real PostgreSQL health check (`GET /api/v1/health` 200 `db: "ok"`).
 - Phase 2 onward: `pnpm content:check` becomes mandatory inside `pnpm verify`.
 - Phase 3 onward: `pnpm db:migrate && pnpm db:seed` checks become mandatory.
@@ -14,21 +28,23 @@ Every commit requires `pnpm verify` and all checks applicable to implemented fun
 - Add meaningful tests alongside earlier functionality when applicable. Unimplemented checks must remain explicitly unavailable (exit non-zero), never return a fake pass. No safety invariant or final release requirement is waived.
 
 pnpm install
-pnpm db:up                      # Postgres 16 via docker compose
+pnpm db:up # Postgres 16 via docker compose
 pnpm db:migrate && pnpm db:seed # Phase 3 onward
-pnpm verify                     # typecheck + lint + format:check + tests + build (+ content:check from Phase 2)
-pnpm test:e2e                   # Phase 6 onward: Playwright, mobile + desktop projects
+pnpm verify # typecheck + lint + format:check + tests + build (+ content:check from Phase 2)
+pnpm test:e2e # Phase 6 onward: Playwright, mobile + desktop projects
 
 ## Repository map
-apps/web             Next.js app: UI (app/), API route handlers (app/api/v1/), server modules (server/)
-packages/domain      Pure TS: Rational, parser, verifier, belief reducer, L1/L2/L3 policy, sparks. No I/O.
-packages/content     Concepts, edges, chapters, misconceptions, templates, explanations + content:check
-packages/db          Drizzle schema, migrations, seed, principal-scoped repositories
-packages/ai          LLM provider interface, openai/mock/disabled providers, prompts, guards, PII scrubber
-packages/contracts   Zod schemas for every API request/response, shared by server and client
-docs/                SPEC.md, BUILD_PLAN.md, BUILD_LOG.md, RUNBOOK.md, THREAT_MODEL.md
+
+apps/web Next.js app: UI (app/), API route handlers (app/api/v1/), server modules (server/)
+packages/domain Pure TS: Rational, parser, verifier, belief reducer, L1/L2/L3 policy, sparks. No I/O.
+packages/content Concepts, edges, chapters, misconceptions, templates, explanations + content:check
+packages/db Drizzle schema, migrations, seed, principal-scoped repositories
+packages/ai LLM provider interface, openai/mock/disabled providers, prompts, guards, PII scrubber
+packages/contracts Zod schemas for every API request/response, shared by server and client
+docs/ SPEC.md, BUILD_PLAN.md, BUILD_LOG.md, RUNBOOK.md, THREAT_MODEL.md
 
 ## Non-negotiables
+
 1. Beliefs change only via the belief reducer in packages/domain over stored evidence.
 2. Never grade with floating point: use Rational (BigInt). Never use eval or new Function.
 3. Assisted attempts, AI output, boss results and clicks never promote mastery.
@@ -44,6 +60,7 @@ docs/                SPEC.md, BUILD_PLAN.md, BUILD_LOG.md, RUNBOOK.md, THREAT_MO
 11. Build only what the spec asks for. No extra features, routes or dependencies without a logged reason.
 
 ## Conventions
+
 - TypeScript strict; no `any` (use unknown + Zod). ESM, named exports, small pure functions in domain.
 - Validate every input at the boundary with packages/contracts schemas.
 - Errors: { "error": { "code": "...", "message": "..." } } with the right HTTP status; no stack traces.
@@ -55,6 +72,7 @@ docs/                SPEC.md, BUILD_PLAN.md, BUILD_LOG.md, RUNBOOK.md, THREAT_MO
 - Tests sit next to code (*.test.ts). packages/domain needs >= 90% line coverage.
 
 ## Workflow
+
 - Follow SPEC §24 phase by phase. At each phase end: run the exit checks, commit
   "phase N: <summary>", and append to docs/BUILD_LOG.md: built / checks + results / assumptions / follow-ups.
 - When the spec is silent, choose the simplest option consistent with it and log it under Assumptions.

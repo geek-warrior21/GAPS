@@ -979,7 +979,7 @@ Implement an evidence-driven adaptive loop through the shared lesson engine for 
 
 2. **Policy Separation from Model Suggestions (`TeachingPolicyEngine` in `apps/web/server/teaching/policy.ts`):**
    - Server-Authoritative Envelope: Server determines eligible actions and transition prerequisites; model/authored engines can only select and configure activities within those strict bounds.
-   - Mastery Gating: Strict invariant that models cannot declare mastery or trigger progression; `advance` is eligible *only* when the student has demonstrated $\ge 2$ consecutive distinct correct unassisted items on the objective.
+   - Mastery Gating: Strict invariant that models cannot declare mastery or trigger progression; `advance` is eligible _only_ when the student has demonstrated $\ge 2$ consecutive distinct correct unassisted items on the objective.
    - Ambiguous vs Definite Misconceptions: Implemented `evaluateErrorMisconception`. Definite misconceptions (`REVERSAL`, `WHOLE_PART_CONFUSION`, `AIR_GAP`, `CURRENT_CONSUMPTION`) trigger targeted interventions; ambiguous or unclassified errors trigger diagnostic probes (`independent_check` with targeted diagnostic choices). Definite misconceptions are never inferred from ambiguous errors.
    - Bounded Remediation: Policy tracks remediation cycles. If a student encounters repeated difficulty ($\ge 2$ remediation cycles), the server policy forces `eligibleActions = ["pause"]` with a genuine save-and-pause stopping point and takeaway summary.
 
@@ -997,7 +997,7 @@ Implement an evidence-driven adaptive loop through the shared lesson engine for 
    - AI Gateway Integration: Adheres strictly to `isAiRuntimeEnabled()`, PII scrubbing via `scrubPii`, and zero student PII sent to LLM.
    - Verification Pipeline: Verifies model output against Zod schema, checks that chosen action is strictly within server-allowed `eligibleActions`, and runs factual simulation parameter bounds (`validateActivityFactualRules`).
    - Tags output with `unverifiedExplanatoryProse: true` to prevent unreviewed model prose from masquerading as verified content.
-   - Deterministic Fallback: Automatically falls back to `AuthoredTeachingDecisionEngine` for the *same* objective on any provider failure, timeout, schema violation, or disabled provider setting.
+   - Deterministic Fallback: Automatically falls back to `AuthoredTeachingDecisionEngine` for the _same_ objective on any provider failure, timeout, schema violation, or disabled provider setting.
 
 5. **Session Durability & Refresh Recovery (`apps/web/server/lesson/service.ts`):**
    - Enhanced lesson session state persistence: saves `counters.activeActivity` at every branch transition and activity completion in `learning_sessions.counters`.

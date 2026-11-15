@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    fileParallelism: false,
     include: ["packages/*/src/**/*.test.ts", "apps/web/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/.next/**", "**/e2e/**"],
     coverage: {
