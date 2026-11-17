@@ -1160,3 +1160,277 @@ Starting point: `e62b296561550d62a9f70f2ebdc8525b47040aae` (Gem's handoff commit
   assessed item). Lesson UI strings remain hard-coded in components rather than `messages/en.json`.
 - If the page is reloaded between "Submit Answer" and "Continue", the verdict text is not shown again;
   the stored result and next step are unaffected.
+
+---
+
+## 2026-11-16 — Adaptive Lessons as the Default Entry, Protected Developer Tools, Enforced Content Review (Clau)
+
+Continues from `05c1ecca4dc0bbded5c2b88f380611aeff58dc7f`. Delivered as `GAPS-clau-001.zip` under the
+ZIP handoff workflow (see AGENT_WORKFLOW.md); no commit, push, merge or deployment.
+
+### 1. Built
+
+1. **Engine-driven lessons are the primary Learn entry** for parts of a whole and simple circuits.
+   - `getPrimaryLessonIdForTopic` picks the engine-driven lesson where one exists, else the topic's
+     fixed lesson. `GET /api/v1/curriculum/topics` now returns, per topic, `entryLessonId`,
+     `entryIsResume` and `lessonAvailable`; for a student it resumes their lesson in progress for that
+     topic (fixed or engine-driven) instead of starting a second one.
+   - Learn shows exactly one lesson button per topic ("Start Lesson" / "Continue Lesson"). The extra
+     "Step-by-Step Lesson" and "Take Mastery Assessment" buttons and the developer link are gone.
+   - Fixed lesson URLs and sessions are unchanged and still resume. Equivalent fractions and
+     conductors keep their existing lessons.
+   - Next-action recommendations return to the lesson in progress, else the primary lesson. The
+     circuits "fresh check" now opens the engine-driven lesson rather than the fixed mastery lesson.
+2. **Developer tools protected on the server** (`server/dev-tools.ts`, `server/runtime-policy.ts`).
+   - `/dev/lesson-planner` is now a server component that renders the planner only when tools are
+     enabled and the session cookie belongs to a staff admin; otherwise the normal 404 page.
+   - All three `/api/v1/dev/*` routes call `requireDevTools`: 404 when disabled, 401 unauthenticated,
+     403 for students and teachers.
+   - Enabled means `NODE_ENV !== "production"` AND `DEV_TOOLS_ENABLED=true` (new variable, default
+     off). Nothing enables them in production, including the browser-test flag.
+3. **Enforceable lesson-content review metadata.**
+   - `ContentReviewSchema` (status, version, authoredBy, reviewedBy, reviewedAt, notes). "reviewed"
+     requires a named reviewer and time; "draft" must not carry them.
+   - Review records on: the 4 fixed lessons, the 2 engine-driven lesson definitions, the authored
+     teaching activities per objective (also the fallback for any other engine), and each of the 18
+     item-bank items (`ITEM_REVIEW_RECORDS`, empty; every item falls back to draft).
+   - Gate: `isContentServable`. Production refuses draft, missing, incomplete and retired records
+     whatever `CONTENT_SERVE_DRAFTS` says. Outside production drafts are served unless
+     `CONTENT_SERVE_DRAFTS=false`. The only production exception is the browser-test harness
+     (`PLAYWRIGHT_TEST=1`, loopback `APP_BASE_URL`, `CONTENT_SERVE_DRAFTS=true`).
+   - Enforced at lesson start, resume and every response for fixed and engine-driven lessons; in item
+     selection (unservable items are excluded for every engine, and a check that is not a servable bank
+     item is refused); and in lesson availability, which requires the definition, teaching content,
+     probe and at least 3 items across 2 templates to be servable.
+   - The same gate now applies to practice templates in `session/engine.ts`, which previously served
+     drafts in every environment.
+   - `content:check` validates lesson review records and prints how many lessons await review.
+4. Lesson service errors now reach the client with their own status and code (they were all 500).
+5. Real-student model calls stay off; a test asserts sessions use the authored engine even with the
+   AI runtime switched on.
+
+**Nothing was marked reviewed.** No educator has reviewed any of this content.
+
+### 2. Verification Results (this device, PostgreSQL 16.16, `LLM_PROVIDER=disabled`)
+
+- **`pnpm verify`:** passed on the final tree.
+- **`pnpm test`:** 45 files, 355 tests (was 43 / 330). New: `content-and-dev-access.test.ts` (22),
+  `packages/content/src/lessons/review.test.ts` (2), one added to `adaptive-lesson.test.ts`.
+- **`pnpm test:e2e`:** 48 tests passed. 22 scenarios on Desktop and Mobile Chrome against the
+  production build (44), plus 4 developer-tool tests against a development server with
+  `DEV_TOOLS_ENABLED=true`.
+- **`pnpm content:check`:** 42 templates; lessons: 0 reviewed, 4 awaiting review.
+- **Manual check of the production build without the test flag** (with `CONTENT_SERVE_DRAFTS=true` and
+  `DEV_TOOLS_ENABLED=true` set on purpose): all 6 lesson starts returned 404 `LESSON_NOT_AVAILABLE`;
+  topics reported every lesson unavailable; the developer page and all 3 developer APIs returned 404
+  for a staff admin, a student and an anonymous caller.
+
+### 3. Browser journeys changed, and why
+
+- S11, S12, S14, S15, S16 exercised the fixed lessons by clicking Learn. Learn now opens the
+  engine-driven lesson, so they open the fixed lesson at its preserved URL. Their checks (grading,
+  remediation, stopping point, save and resume, reload, Sparks) are unchanged. S12 also proves Learn
+  shows "Continue Lesson" for a fixed lesson in progress and resumes it at the same activity.
+- S17 follows the fresh-check recommendation from Learn into the engine-driven lesson and demonstrates
+  mastery from one fixed-lesson answer plus two engine-driven answers across two templates.
+- S20–S23 enter from Learn and assert there is one lesson per topic. S23 resumes through Learn.
+- S18 and S19 moved to `e2e/dev-tools.spec.ts`: they need developer tools, which no longer exist in
+  the production build. They sign in as staff admin. D1 and D2 (new) cover anonymous and student
+  refusal there; S24 (new) covers refusal for everyone in the production build.
+
+### 4. Assumptions
+
+- "Production" is `NODE_ENV=production`. A locally built `pnpm start` therefore serves no lessons; the
+  local demo is `pnpm dev`. The browser-test exception is deliberate and limited to loopback.
+- A topic with a lesson in progress resumes it from Learn rather than offering the new lesson beside
+  it; the engine-driven lesson becomes the entry once that session completes.
+- `DEV_TOOLS_ENABLED` is the "explicit enablement". It is `false` in `.env.example`.
+- Review version is per record and starts at 1; changing content should bump it and reset to draft.
+
+### 5. Content that still needs genuine educator review
+
+Until these are reviewed and recorded, production serves no lessons and no practice.
+
+- Fixed lessons (4): `lesson-maths-frac-part-1`, `lesson-sci-circuits-1`,
+  `lesson-sci-circuits-mastery`, `lesson-sci-conductors-1` (`packages/content/src/lessons/review.ts`).
+- Engine-driven lesson definitions (2) (`apps/web/server/teaching/adaptive-lessons.ts`).
+- Authored teaching activities for `MATH-FRAC-PART` and `SCI-ELEC-CIRCUITS`
+  (`apps/web/server/teaching/authored-engine.ts`).
+- Item bank: 16 assessed questions and 2 diagnostic probes, including each correct answer and
+  misconception tag (`apps/web/server/teaching/item-bank.ts`).
+- Practice templates: all 42 (`packages/content/src/templates`).
+
+### 6. Remaining gaps
+
+- No live model was exercised; model calls for real students remain disabled pending the per-student
+  consent and class controls.
+- The review gate checks that a record is complete, not that the named person reviewed it. Recording a
+  review is a code change and should be made only with the educator's sign-off.
+- Review records live in code, not the database; there is no review workflow or UI.
+- Home, Play, quests and bosses were not given "coming soon" states: in production their practice
+  requests now fail with a 404 message instead of serving drafts.
+- Developer-tool browser tests need a development server on port 3101, which adds about 10 seconds
+  to `pnpm test:e2e`.
+- Developer-preview fixtures (`lesson/planner-fixtures.ts`) carry no review record; they are reachable
+  only through the protected developer tools.
+
+---
+
+## 2026-11-16 — Open-Topic Teaching: Any Topic as an LLM-Composed Preview Lesson (Clau)
+
+Continues from the tree delivered as `GAPS-clau-001.zip`. Delivered as `GAPS-clau-002.zip` under the
+ZIP handoff workflow; no commit, push, merge or deployment. Implements SPEC Appendix G (new).
+
+### 1. Live demonstration status: BLOCKED
+
+No provider credentials exist on this device (`OPENAI_API_KEY` is empty and no key is set in the
+shell). `pnpm demo:open-topic` therefore exits with "BLOCKED" and wrote no transcript. **Live
+generation has not been demonstrated.** Everything below was verified with the mock provider and
+scripted test doubles, which prove the wiring, validation, persistence and player, and nothing about
+whether a real model produces good or correct lessons. With `LLM_PROVIDER=openai` and a key (or any
+OpenAI-compatible endpoint via `OPENAI_BASE_URL`), the same command runs photosynthesis, states of
+matter and negative numbers with succeeding and struggling synthetic learners and writes
+`docs/demos/open-topic-live-demo.md`.
+
+### 2. Built
+
+1. **Entry.** Learn has a "Learn any maths or science topic" box (topic text, Class 6–8).
+   `POST /api/v1/open-lessons` answers `ready`, `needs_clarification` or `unavailable`. A topic is a
+   string: no file, enum entry, concept id or page is needed. New route, logged reason: the direction
+   update requires topic entry, and the existing start route carries no body.
+2. **Topic resolution (`open-topic/topics.ts`).** An authored lesson is opened only when every
+   significant word of the request belongs to that lesson's vocabulary ("fractions", "simple
+   circuits"); "equivalent fractions" is not redirected to parts of a whole. Approved source packs are
+   matched the same way and reported with their own (draft) review status.
+3. **Teaching intelligence (`open-topic/engine.ts`).** One call plans a 2–3 step opening (or asks
+   one clarification, or declines as out of scope); later steps are requested one at a time with the
+   learning goal, level, the lesson's history and outcomes, any sources, the activity catalogue and
+   the server's eligible actions. The opening queue is dropped as soon as an answer is missed.
+4. **Server envelope (`open-topic/machine.ts`).** Reuses `TeachingPolicyEngine` with no belief
+   status, so `advance` can never be eligible. Every incorrect answer is treated as ambiguous (no
+   verified misconception map exists), leading to one diagnostic probe, then teaching, then a
+   supported check; two remediation cycles force a server-written pause. Three unassisted correct
+   practice answers, or 14 steps, close the round with a server-written closing step.
+5. **Validation (`open-topic/validation.ts`).** Schema; action inside the envelope; component type
+   allowed for the action; simulations only where a tested one is relevant to the topic; guided
+   practice only with a simulation and a reachable target; question shape and answer key; exact
+   arithmetic re-computation of numeric keys (`open-topic/arithmetic.ts`, rationals, no eval); text
+   limits; rejection of URLs, citation-like text, markup, promised interactions and harsh feedback;
+   source ids limited to those supplied; curriculum identifiers stripped. One corrected retry, then
+   the step fails.
+6. **Sessions (`open-topic/session.ts`).** Stored in `learning_sessions` under `open-<sessionId>`;
+   each accepted activity is stored before display; refresh returns it without a model call;
+   responses are idempotent with a guarded write; the model is called outside any transaction; a
+   provider failure saves the answer and marks the lesson as waiting, and reopening the lesson retries.
+   Responses are `open_topic_step` events only: no attempts, no beliefs, no Sparks.
+7. **Consent gateway (`ai/gateway.ts`).** The first enforcement of SPEC §21 step 1: runtime on, kill
+   switch off, class `ai_enabled`, student `ai_free_text` consent not revoked, daily budget unspent,
+   read fresh per call. Calls are logged to `llm_calls` and counted per student as `ai_model_call`
+   events, metadata only.
+8. **Content status.** `contentStatus` on every lesson response: `reviewed`, `authored_draft`,
+   `source_grounded` or `model_knowledge`. The player shows a one-line "Generated preview" banner
+   with the sources supplied (or none), marks check results as practice feedback, and ends with a
+   practice-only screen without Sparks.
+9. **Player.** Prediction activities work without a simulation; numeric answers; a "next step is not
+   ready" card with retry and save-for-later.
+10. **Production.** Generated previews are unreviewed content: not offered and not resumable where
+    drafts may not be served.
+11. `pnpm demo:open-topic` (live, synthetic learners) and `--dry-run-mock` (wiring check, labelled as
+    not a demonstration). Mock provider gained clearly-labelled responses for the two new purposes.
+
+### 3. Verification Results (this device, PostgreSQL 16.16)
+
+- **`pnpm verify`:** passed on the final tree.
+- **`pnpm test`:** 46 files, 393 tests (was 45 / 355). New `open-topic.test.ts` (38).
+- **`pnpm test:e2e`:** 53 passed. 23 scenarios on Desktop and Mobile Chrome against the production
+  build (46, AI off), and 7 on a development server (developer tools, and open-topic journeys O1–O3
+  with the mock provider).
+- **`pnpm demo:open-topic`:** exit 2, BLOCKED (no credentials). `--dry-run-mock`: 6 of 6 synthetic
+  runs reached a closing step; the struggling runs diverged at step 4.
+
+### 4. Assumptions
+
+- "School level" is Class 6, 7 or 8 for now.
+- Generated lessons award no Sparks and never touch the GapMap, including questions whose numeric key
+  the server recomputed: the key is verified, the item's fit to an objective is not.
+- The existing source packs count as "approved sources" but are themselves unreviewed drafts, and are
+  shown as such.
+- The demo runner does not require `AI_ZDR_CONFIRMED`, because synthetic learners involve no child's
+  data. Student sessions do.
+- The model's rationale and proposals are stored in the developer trace and never shown to students.
+
+### 5. Remaining gaps
+
+- **Live generation is undemonstrated** (see 1). Prompt quality, factual accuracy, age-appropriateness
+  and how often real output passes validation are all unknown.
+- Validation cannot judge whether an explanation is true or whether a multiple-choice key is right.
+  Only numeric keys with an arithmetic expression are independently checked.
+- The catalogue has two simulations. For most topics a generated lesson is explanation, prediction
+  and questions. No number line, particle model or diagram component exists.
+- The citation and capability guards are pattern lists and will have false positives and negatives.
+- Provider moderation of the topic text is wired but only the OpenAI provider implements it.
+- The tutor and Solve With Me still call the provider without the new consent gateway (existing gap);
+  only open-topic lessons use it.
+- No teacher or staff view of generated lessons, and no path for an educator to review and promote one.
+- The per-student budget counts `ai_model_call` events because `llm_calls` has no student column.
+- Open-topic browser journeys run on the development server only, since the production build serves
+  no drafts outside the loopback test harness and runs with AI off.
+
+---
+
+## 2026-11-16 — Open-Topic Teaching Moved to the Protected Developer Preview (Clau)
+
+Revises the previous entry after Gyan's brief for this task: implement open-topic teaching
+"initially in the protected developer preview using synthetic learners". The earlier
+`GAPS-clau-002.zip` exposed it to consenting students on Learn; that archive is superseded by the
+reissued `GAPS-clau-002.zip`. Predecessor: `GAPS-clau-001.zip`, unchanged
+(SHA-256 `ffeb6e5dba4149a20255ca48ecb728c53aabf8bf0d80358cdd0b175e6f172576`).
+
+### 1. Changed
+
+1. **Developer preview (`/dev/open-topic`, `server/open-topic/dev-preview.ts`).** Behind the
+   developer-tools gate. A staff admin starts a lesson on any topic as a synthetic learner
+   (`stu_synthetic_preview_learner`: locked, no class, no credential, no consent record). The lesson
+   uses the same persisted session lifecycle as student lessons and plays in the same player. The
+   page shows provider readiness (and says plainly when the mock is in use or what is missing), a
+   scripted succeeding or struggling auto-play, and a decision trace with answer keys, key
+   verification, eligible actions, the model's rationale and its proposals labelled as unverified.
+2. **Six protected routes** under `/api/v1/dev/open-topic` (readiness, create, start, respond,
+   autoplay, trace). Logged reason: the preview needs its own endpoints because the student lesson
+   endpoints are student-only and scoped to the caller.
+3. **Student entry off by default.** `OPEN_TOPIC_STUDENT_ENTRY` (new, default `false`, ignored in
+   production) gates the Learn box and `POST /api/v1/open-lessons`. With it off, students see no
+   any-topic entry and the route answers `preview_not_allowed`. The consent gateway is unchanged and
+   still required when the entry is on.
+4. **Demo runner** now prints and records PASS/FAIL checks per topic and exits 0, 1 or 2 (blocked).
+5. `LessonPlayer` accepts an endpoint base and exit link so the preview can reuse it unchanged.
+
+### 2. Results, reported separately
+
+**Live-model tests: NOT RUN (blocked).** `pnpm demo:open-topic` exited 2: `LLM_PROVIDER` is
+`disabled` and no API key is present on this device. No real model generated anything. Needed to
+run: `LLM_PROVIDER=openai`, `OPENAI_API_KEY`, optionally `OPENAI_BASE_URL` and `LLM_MODEL_TUTOR`.
+Exact steps: `docs/demos/OPEN_TOPIC_DEMO.md`.
+
+**Authored and fallback tests (no model): passed.**
+
+- Authored lessons with the provider disabled, authored-engine fallback, content gates and developer
+  access: `adaptive-lesson`, `teaching`, `lesson`, `content-and-dev-access` test files: 81 of 81.
+- Open-topic failure and refusal paths (provider timeout/error/refusal/invalid output, rejected
+  output after one retry, kill switch mid-lesson, no permission, production refusal): 9 of 9.
+- Browser, production build with AI off: 46 of 46 (23 scenarios on Desktop and Mobile Chrome).
+
+**Open-topic wiring tests with mock and scripted providers (not live): passed.**
+
+- `open-topic.test.ts`: 42 of 42 (includes the 9 above and the developer-preview routes for every role).
+- Browser, development server with the mock provider: 8 of 8 (D1, D2, S18, S19, P1 developer
+  preview journey, O1–O3 student entry explicitly enabled).
+- `pnpm demo:open-topic --dry-run-mock`: 12 of 12 wiring checks.
+
+**Full gate:** `pnpm verify` passed: 397 unit/integration tests in 46 files, 54 browser tests.
+
+### 3. Remaining gaps
+
+As in the previous entry, plus: no staff sign-in screen exists, so the preview is reached by signing
+in through the API (see the demo guide); synthetic-learner lessons accumulate in the database and
+are not cleaned up; the mock provider remains selectable in the preview and is labelled, not blocked.

@@ -67,5 +67,28 @@
       "No personal data leaves the server or enters structured logs",
       "No placeholder mastery claims or unreviewed content served"
     ]
+  },
+  "openTopic": {
+    "heading": "Learn any maths or science topic",
+    "description": "Type a topic in your own words and we will build a short lesson for you, one step at a time.",
+    "topicLabel": "Topic",
+    "topicPlaceholder": "For example: photosynthesis, negative numbers",
+    "levelLabel": "Class",
+    "start": "Start lesson",
+    "starting": "Preparing your lesson…",
+    "retry": "Try again",
+    "clarifyHeading": "One quick question",
+    "genericError": "We could not start that lesson. Please try again.",
+    "previewBadge": "Generated preview",
+    "previewNote": "Made by AI for this topic and not yet checked by a teacher. Practice only: it does not change your GapMap.",
+    "previewSources": "Based on approved notes (not yet reviewed):",
+    "previewNoSources": "No approved source was available for this topic.",
+    "practiceFeedback": "Practice feedback from a generated preview.",
+    "waitingHeading": "Your next step is not ready yet",
+    "waitingBody": "Your answer is saved. We could not prepare the next step just now.",
+    "waitingRetry": "Try again",
+    "waitingLater": "Save and come back later",
+    "completeHeading": "Practice round complete",
+    "completeBody": "This lesson was a generated preview, so it was practice only. It does not change your GapMap or count as mastery."
   }
 }

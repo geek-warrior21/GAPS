@@ -8,6 +8,8 @@ import { generateItem } from "./index";
 import { MISCONCEPTIONS, MISCONCEPTIONS_BY_ID } from "./misconceptions";
 import { TEMPLATES, TEMPLATES_BY_CONCEPT } from "./templates";
 import type { Template } from "./types";
+import { LessonPlanSchema } from "@gaps/contracts";
+import { LESSON_REGISTRY } from "./lessons";
 
 export interface CheckFailure {
   readonly templateId?: string;
@@ -345,6 +347,41 @@ export function checkTemplate<P>(template: Template<P>, numSeeds = 500): CheckFa
   return failures;
 }
 
+/**
+ * Every registered lesson must match the lesson schema and carry a well-formed
+ * review record. This checks the record's shape (a "reviewed" lesson must name
+ * its reviewer and time); it cannot and does not vouch that a review happened.
+ */
+export function checkLessons(): CheckFailure[] {
+  const failures: CheckFailure[] = [];
+  for (const [lessonId, lesson] of Object.entries(LESSON_REGISTRY)) {
+    const parsed = LessonPlanSchema.safeParse(lesson);
+    if (!parsed.success) {
+      failures.push({
+        check: "lesson-schema",
+        message: `Lesson ${lessonId}: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+      });
+      continue;
+    }
+    if (!parsed.data.review) {
+      failures.push({
+        check: "lesson-review",
+        message: `Lesson ${lessonId} has no review metadata (status, version, authoredBy).`,
+      });
+    }
+  }
+  return failures;
+}
+
+export function summarizeLessonReview(): { reviewed: string[]; unreviewed: string[] } {
+  const reviewed: string[] = [];
+  const unreviewed: string[] = [];
+  for (const [lessonId, lesson] of Object.entries(LESSON_REGISTRY)) {
+    (lesson.review?.status === "reviewed" ? reviewed : unreviewed).push(lessonId);
+  }
+  return { reviewed, unreviewed };
+}
+
 export function runContentCheck(options?: {
   numSeeds?: number;
   verbose?: boolean;
@@ -359,6 +396,7 @@ export function runContentCheck(options?: {
 
   allFailures.push(...checkGraphAcyclicity());
   allFailures.push(...checkMisconceptionsCatalog());
+  allFailures.push(...checkLessons());
 
   if (verbose) {
     process.stdout.write(`Checking ${TEMPLATES.length} templates with ${numSeeds} seeds each...\n`);
@@ -393,6 +431,12 @@ if (isEntrypoint) {
   if (result.ok) {
     process.stdout.write(
       `\n✓ content:check PASSED: ${result.templatesChecked} templates verified across ${result.seedsTestedPerTemplate} seeds each (all acyclic, distinct >= 20, zero hint leaks, well-formed answers).\n`,
+    );
+    const lessons = summarizeLessonReview();
+    process.stdout.write(
+      `  Lessons: ${lessons.reviewed.length} reviewed, ${lessons.unreviewed.length} awaiting educator review (served only where drafts are allowed)${
+        lessons.unreviewed.length > 0 ? `: ${lessons.unreviewed.join(", ")}` : ""
+      }.\n`,
     );
     process.exitCode = 0;
   } else {

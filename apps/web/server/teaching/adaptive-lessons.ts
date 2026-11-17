@@ -1,4 +1,4 @@
-import type { LessonPlan, SubjectId } from "@gaps/contracts";
+import type { ContentReview, LessonPlan, SubjectId } from "@gaps/contracts";
 import type { ConceptId } from "@gaps/domain";
 
 /**
@@ -15,7 +15,17 @@ export interface AdaptiveLessonDefinition {
   readonly title: string;
   readonly description: string;
   readonly learningObjectives: readonly string[];
+  /** Review of the lesson framing (title, description, objectives). */
+  readonly review: ContentReview;
 }
+
+/** Drafted by an AI engineering agent; not reviewed by an educator. */
+const DEFINITION_DRAFT_REVIEW: ContentReview = {
+  status: "draft",
+  version: 1,
+  authoredBy: "ai-drafted:clau",
+  notes: "Awaiting educator review of lesson title, description and learning objectives.",
+};
 
 const DEFINITIONS: readonly AdaptiveLessonDefinition[] = [
   {
@@ -32,6 +42,7 @@ const DEFINITIONS: readonly AdaptiveLessonDefinition[] = [
       "Explain what the top and bottom numbers of a fraction count",
       "Recognise that fraction names need equal parts",
     ],
+    review: DEFINITION_DRAFT_REVIEW,
   },
   {
     lessonId: "lesson-sci-circuits-adaptive",
@@ -47,11 +58,17 @@ const DEFINITIONS: readonly AdaptiveLessonDefinition[] = [
       "Predict what an open switch or a loose wire does to a bulb",
       "Find the fault in a circuit that does not work",
     ],
+    review: DEFINITION_DRAFT_REVIEW,
   },
 ];
 
 export function getAdaptiveLesson(lessonId: string): AdaptiveLessonDefinition | undefined {
   return DEFINITIONS.find((d) => d.lessonId === lessonId);
+}
+
+/** The engine-driven lesson for a curriculum topic, when one exists. */
+export function getAdaptiveLessonForTopic(topicId: string): AdaptiveLessonDefinition | undefined {
+  return DEFINITIONS.find((d) => d.topicId === topicId);
 }
 
 export function listAdaptiveLessons(): readonly AdaptiveLessonDefinition[] {

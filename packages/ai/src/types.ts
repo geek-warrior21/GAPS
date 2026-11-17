@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-export type LlmPurpose = "explain" | "solve_parse" | "solve_step" | "tutor";
+export type LlmPurpose =
+  | "explain"
+  | "solve_parse"
+  | "solve_step"
+  | "tutor"
+  /** Open-topic teaching: choose a short opening sequence for a learning goal. */
+  | "lesson_open"
+  /** Open-topic teaching: choose the next step from the learner's responses. */
+  | "lesson_step";
 
 export interface GenerateRequest<T> {
   purpose: LlmPurpose;

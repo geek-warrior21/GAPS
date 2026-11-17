@@ -1,8 +1,10 @@
 import type { LessonPlan } from "@gaps/contracts";
+import { LESSON_DRAFT_REVIEW } from "./review";
 
 export const MATHS_FRAC_PART_LESSON: LessonPlan = {
   lessonId: "lesson-maths-frac-part-1",
   version: "1.0",
+  review: LESSON_DRAFT_REVIEW,
   subject: "maths",
   level: 6,
   topicId: "maths-frac-part",

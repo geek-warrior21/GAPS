@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type {
   ConceptsResponse,
+  CurriculumTopic,
+  CurriculumTopicsResponse,
   HomeDashboardResponse,
   RecommendedNextAction,
 } from "@gaps/contracts";
 import { Header } from "@/components/common/Header";
+import { OpenTopicCard } from "@/components/learn/OpenTopicCard";
 
 const STATUS_CONFIG: Record<string, { label: string; badgeClass: string; icon: string }> = {
   not_assessed: {
@@ -38,12 +41,50 @@ const STATUS_CONFIG: Record<string, { label: string; badgeClass: string; icon: s
   },
 };
 
+/**
+ * The single way into a topic's lesson. The server decides which lesson that is:
+ * the learner's lesson in progress if there is one, otherwise the topic's
+ * primary lesson. A lesson whose content cannot be served here is not offered.
+ */
+function LessonEntryButton({
+  topic,
+  testId,
+  className,
+  icon,
+}: {
+  topic: CurriculumTopic | undefined;
+  testId: string;
+  className: string;
+  icon: string;
+}) {
+  if (!topic?.entryLessonId) return null;
+  if (topic.lessonAvailable === false) {
+    return (
+      <span
+        data-testid={`${testId}-unavailable`}
+        className="px-5 py-3 bg-surface-2 text-muted border border-line rounded-2xl text-xs sm:text-sm font-bold"
+      >
+        This lesson is coming soon
+      </span>
+    );
+  }
+  return (
+    <Link href={`/lesson/${topic.entryLessonId}`} data-testid={testId} className={className}>
+      <span>{topic.entryIsResume ? "Continue Lesson" : "Start Lesson"}</span>
+      <span>{icon}</span>
+    </Link>
+  );
+}
+
 export default function LearnPage() {
   const router = useRouter();
   const [selectedSubject, setSelectedSubject] = useState<"maths" | "science">("maths");
   const [conceptsData, setConceptsData] = useState<ConceptsResponse | null>(null);
   const [homeData, setHomeData] = useState<HomeDashboardResponse | null>(null);
   const [nextAction, setNextAction] = useState<RecommendedNextAction | null>(null);
+  const [topics, setTopics] = useState<CurriculumTopic[]>([]);
+  // Off unless the server says the any-topic entry is enabled for students here.
+  const [openTopicEntry, setOpenTopicEntry] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,6 +123,28 @@ export default function LearnPage() {
 
     loadData();
   }, [router]);
+
+  useEffect(() => {
+    async function fetchTopics() {
+      try {
+        const res = await fetch("/api/v1/curriculum/topics");
+        if (res.ok) {
+          const json: CurriculumTopicsResponse = await res.json();
+          setTopics(json.topics);
+          setOpenTopicEntry(json.openTopicEntry === true);
+        }
+      } catch {
+        // Lesson entry buttons stay hidden until topics load.
+      }
+    }
+    fetchTopics();
+  }, []);
+
+  const topicById = (id: string) => topics.find((t) => t.id === id);
+  // A recommendation is not shown when its lesson cannot be served here.
+  const nextActionUnavailable =
+    nextAction !== null &&
+    topics.some((t) => t.entryLessonId === nextAction.lessonId && t.lessonAvailable === false);
 
   useEffect(() => {
     async function fetchNextAction() {
@@ -157,17 +220,8 @@ export default function LearnPage() {
             </p>
           </div>
 
-          {/* Subject Switcher & Dev Planner Link */}
+          {/* Subject Switcher */}
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            <Link
-              href="/dev/lesson-planner"
-              data-testid="link-dev-planner"
-              className="px-3 py-2 rounded-xl border border-dashed border-purple-500/40 text-purple-700 bg-purple-500/10 hover:bg-purple-500/20 text-2xs font-extrabold transition-colors flex items-center gap-1.5"
-            >
-              <span>🛠️</span>
-              <span>Dev Planner</span>
-            </Link>
-
             <div className="flex items-center gap-1.5 p-1 bg-surface rounded-2xl border border-line shadow-2xs">
               <button
                 type="button"
@@ -200,7 +254,7 @@ export default function LearnPage() {
         </div>
 
         {/* Recommended Next Action on Return based on persisted evidence */}
-        {nextAction && nextAction.actionType !== "start_objective" && (
+        {nextAction && nextAction.actionType !== "start_objective" && !nextActionUnavailable && (
           <div
             data-testid="next-action-card"
             className={`p-6 rounded-3xl border-2 shadow-xs space-y-4 animate-fade-in ${
@@ -258,6 +312,8 @@ export default function LearnPage() {
           </div>
         )}
 
+        {openTopicEntry && <OpenTopicCard />}
+
         {/* MATHEMATICS VIEW */}
         {selectedSubject === "maths" && (
           <div className="space-y-8 animate-fade-in">
@@ -285,40 +341,30 @@ export default function LearnPage() {
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-2xs font-bold text-muted">
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">1. Introduction</span>
-                  Equal sharing concept
+                  <span className="block text-ink font-extrabold">Explore</span>
+                  Slice & shade a strip
                 </div>
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">2. Interactive Strip</span>
-                  Slice & shade models
+                  <span className="block text-ink font-extrabold">Answer</span>
+                  One question at a time
                 </div>
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">3. Predict & Observe</span>
-                  Hypothesize & verify
+                  <span className="block text-ink font-extrabold">Get the right help</span>
+                  Next step fits your answer
                 </div>
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">4. Practice & Check</span>
-                  Target build & check
+                  <span className="block text-ink font-extrabold">Show what you know</span>
+                  On your own, no hints
                 </div>
               </div>
 
               <div className="pt-2 flex flex-wrap items-center justify-end gap-3">
-                <Link
-                  href="/lesson/lesson-maths-frac-part-adaptive"
-                  data-testid="start-maths-adaptive-lesson-button"
-                  className="px-5 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-xs sm:text-sm font-bold shadow-2xs transition-colors flex items-center gap-2"
-                >
-                  <span>Step-by-Step Lesson</span>
-                  <span>🧭</span>
-                </Link>
-                <Link
-                  href="/lesson/lesson-maths-frac-part-1"
-                  data-testid="start-maths-lesson-button"
+                <LessonEntryButton
+                  topic={topicById("maths-frac-part")}
+                  testId="start-maths-lesson-button"
+                  icon="→"
                   className="px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-xs sm:text-sm font-bold shadow-xs transition-colors flex items-center gap-2"
-                >
-                  <span>Launch Interactive Lesson</span>
-                  <span>→</span>
-                </Link>
+                />
               </div>
             </div>
 
@@ -430,48 +476,30 @@ export default function LearnPage() {
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-2xs font-bold text-muted">
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">1. Loop Intro</span>
-                  Continuous path
+                  <span className="block text-ink font-extrabold">Experiment</span>
+                  Switch & bulb
                 </div>
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">2. Interactive Lab</span>
-                  Switch & wires
+                  <span className="block text-ink font-extrabold">Answer</span>
+                  One question at a time
                 </div>
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">3. Predict & Test</span>
-                  Open circuit test
+                  <span className="block text-ink font-extrabold">Get the right help</span>
+                  Next step fits your answer
                 </div>
                 <div className="p-2.5 bg-surface-2/60 rounded-xl border border-line">
-                  <span className="block text-ink font-extrabold">4. Guided Challenge</span>
-                  Complete loop
+                  <span className="block text-ink font-extrabold">Show what you know</span>
+                  On your own, no hints
                 </div>
               </div>
 
               <div className="pt-2 flex flex-wrap items-center justify-end gap-3">
-                <Link
-                  href="/lesson/lesson-sci-circuits-adaptive"
-                  data-testid="start-circuits-adaptive-lesson-button"
-                  className="px-5 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-xs sm:text-sm font-bold shadow-2xs transition-colors flex items-center gap-2"
-                >
-                  <span>Step-by-Step Lesson</span>
-                  <span>🧭</span>
-                </Link>
-                <Link
-                  href="/lesson/lesson-sci-circuits-mastery"
-                  data-testid="start-circuits-mastery-button"
-                  className="px-5 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-xs sm:text-sm font-bold shadow-2xs transition-colors flex items-center gap-2"
-                >
-                  <span>Take Mastery Assessment</span>
-                  <span>✍️</span>
-                </Link>
-                <Link
-                  href="/lesson/lesson-sci-circuits-1"
-                  data-testid="start-circuits-lesson-button"
+                <LessonEntryButton
+                  topic={topicById("sci-elec-circuits")}
+                  testId="start-circuits-lesson-button"
+                  icon="⚡"
                   className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl text-xs sm:text-sm font-bold shadow-xs transition-colors flex items-center gap-2"
-                >
-                  <span>Launch Circuit Simulator</span>
-                  <span>⚡</span>
-                </Link>
+                />
               </div>
             </div>
 
@@ -504,14 +532,12 @@ export default function LearnPage() {
               </p>
 
               <div className="pt-2 flex justify-end">
-                <Link
-                  href="/lesson/lesson-sci-conductors-1"
-                  data-testid="start-conductors-lesson-button"
+                <LessonEntryButton
+                  topic={topicById("sci-elec-conductors")}
+                  testId="start-conductors-lesson-button"
+                  icon="→"
                   className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-xs sm:text-sm font-bold shadow-xs transition-colors flex items-center gap-2"
-                >
-                  <span>Explore Conductors</span>
-                  <span>→</span>
-                </Link>
+                />
               </div>
             </div>
           </div>

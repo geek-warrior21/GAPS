@@ -21,6 +21,7 @@ import {
   type DeliveredStep,
   type StepOutcome,
   StepResponseError,
+  UnservableContentError,
   appendStep,
   beginNewRound,
   buildDecisionInput,
@@ -34,6 +35,7 @@ import {
 } from "./sequencer";
 import { CANONICAL_MISCONCEPTION_IDS } from "./item-bank";
 import { getTeachingDecisionEngine } from "./factory";
+import { getAdaptiveLessonAvailability } from "./availability";
 import { redactActivityForStudent } from "../lesson/redact";
 import { LessonServiceError, recordLessonAssessment } from "../lesson/service";
 import { generateDomainId } from "../session/engine";
@@ -57,6 +59,22 @@ type SessionRow = typeof learningSessions.$inferSelect;
 type StudentRepo = ReturnType<typeof createStudentRepo>;
 
 const LESSON_SPARKS = 15;
+
+/**
+ * Content gate (Non-negotiable 10). Applies to new and resumed sessions and to
+ * every response, so unreviewed content cannot be reached in production
+ * through a session that began elsewhere.
+ */
+function assertLessonAvailable(def: AdaptiveLessonDefinition): void {
+  const availability = getAdaptiveLessonAvailability(def);
+  if (!availability.available) {
+    log.warn("lesson.adaptive.unavailable", {
+      lessonId: def.lessonId,
+      reasons: [...availability.reasons],
+    });
+    throw new LessonServiceError("This lesson is not available yet.", 404, "LESSON_NOT_AVAILABLE");
+  }
+}
 
 function resolveEngine(options?: AdaptiveSessionOptions): TeachingDecisionEngine {
   // Real sessions use the authored engine. A model-backed engine needs the
@@ -219,6 +237,7 @@ export async function startOrResumeAdaptiveLesson(
   db: DbClient,
   options?: AdaptiveSessionOptions,
 ): Promise<LessonSessionResponse> {
+  assertLessonAvailable(def);
   const studentRepo = createStudentRepo(studentId, db);
 
   const existing = await findSession(db, studentId, def.lessonId, ["active"]);
@@ -315,10 +334,18 @@ export async function respondToAdaptiveLesson(
   db: DbClient,
   options?: AdaptiveSessionOptions,
 ): Promise<LessonRespondResponse> {
+  assertLessonAvailable(def);
   try {
     return await respondOnce(studentId, def, activityId, response, db, options);
   } catch (err) {
     if (err instanceof LessonServiceError) throw err;
+    if (err instanceof UnservableContentError) {
+      throw new LessonServiceError(
+        "This lesson is not available yet.",
+        404,
+        "LESSON_NOT_AVAILABLE",
+      );
+    }
     // A concurrent submission of the same step may have won the race (unique
     // attempt key or step guard). If so, answer with the stored result.
     const session = await findSession(db, studentId, def.lessonId, ["active", "completed"]);

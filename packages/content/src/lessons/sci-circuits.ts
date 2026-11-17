@@ -1,8 +1,10 @@
 import type { LessonPlan } from "@gaps/contracts";
+import { LESSON_DRAFT_REVIEW } from "./review";
 
 export const SCI_CIRCUITS_LESSON: LessonPlan = {
   lessonId: "lesson-sci-circuits-1",
   version: "1.0",
+  review: LESSON_DRAFT_REVIEW,
   subject: "science",
   level: 6,
   topicId: "sci-elec-circuits",
@@ -229,6 +231,7 @@ export const SCI_CIRCUITS_LESSON: LessonPlan = {
 export const SCI_CIRCUITS_MASTERY_LESSON: LessonPlan = {
   lessonId: "lesson-sci-circuits-mastery",
   version: "1.0",
+  review: LESSON_DRAFT_REVIEW,
   subject: "science",
   level: 6,
   topicId: "sci-elec-circuits",

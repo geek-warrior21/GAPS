@@ -1,8 +1,10 @@
 import type { LessonPlan } from "@gaps/contracts";
+import { LESSON_DRAFT_REVIEW } from "./review";
 
 export const SCI_CONDUCTORS_LESSON: LessonPlan = {
   lessonId: "lesson-sci-conductors-1",
   version: "1.0",
+  review: LESSON_DRAFT_REVIEW,
   subject: "science",
   level: 6,
   topicId: "sci-elec-conductors",

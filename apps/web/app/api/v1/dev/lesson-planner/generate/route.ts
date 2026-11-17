@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { errorResponse } from "@/server/api";
 import { LessonPlanGenerateRequestSchema } from "@gaps/contracts";
 import { LlmLessonPlanner } from "@/server/lesson/planner";
+import { requireDevTools } from "@/server/dev-tools";
 
 export async function POST(req: Request) {
   try {
+    await requireDevTools(req);
     const body = await req.json();
     const parsed = LessonPlanGenerateRequestSchema.safeParse(body);
 

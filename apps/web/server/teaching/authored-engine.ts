@@ -4,9 +4,29 @@ import type {
   TeachingDecisionInput,
   TeachingDecisionOutput,
 } from "@gaps/contracts";
+import type { ContentReview } from "@gaps/contracts";
 import type { TeachingDecisionEngine } from "./types";
 import { TeachingPolicyEngine } from "./policy";
 import { buildCheckActivity, selectAssessmentItem, selectDiagnosticItem } from "./item-bank";
+
+/**
+ * Review state of the authored teaching activities built below (explorations,
+ * explanations, guided tasks, pause and milestone copy), per objective. They
+ * were drafted by AI engineering agents and have not been reviewed by an
+ * educator. This content is also the fallback for every other engine, so it is
+ * gated like any other lesson content.
+ */
+const TEACHING_DRAFT_REVIEW: ContentReview = {
+  status: "draft",
+  version: 1,
+  authoredBy: "ai-drafted:gem+clau",
+  notes: "Awaiting educator review of explanations, analogies, simulations and student copy.",
+};
+
+export const AUTHORED_TEACHING_CONTENT_REVIEW: Readonly<Record<string, ContentReview>> = {
+  "MATH-FRAC-PART": TEACHING_DRAFT_REVIEW,
+  "SCI-ELEC-CIRCUITS": TEACHING_DRAFT_REVIEW,
+};
 
 /**
  * Deterministic, authored implementation of TeachingDecisionEngine.

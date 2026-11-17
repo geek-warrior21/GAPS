@@ -24,7 +24,8 @@
     "content:check": "pnpm --filter @gaps/content content:check",
     "content:preview": "pnpm --filter @gaps/content content:preview",
     "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm content:check && pnpm db:migrate && pnpm db:seed && pnpm test && pnpm build && pnpm test:e2e",
-    "test:e2e": "pnpm --filter @gaps/web test:e2e"
+    "test:e2e": "pnpm --filter @gaps/web test:e2e",
+    "demo:open-topic": "pnpm --filter @gaps/web demo:open-topic"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -20,10 +20,13 @@ import {
   MISCONCEPTION_FEEDBACK,
   countRemainingAssessmentItems,
   getBankItem,
+  getBankItems,
+  getItemReview,
   gradeBankItem,
   selectAssessmentItem,
 } from "./item-bank";
 import { validateActivityFactualRules } from "../lesson/planner-validator";
+import { isContentServable } from "../runtime-policy";
 
 /**
  * Step-by-step sequencing shared by persisted student sessions and the
@@ -153,7 +156,12 @@ function sessionItemIds(state: AdaptiveLessonState): string[] {
  * while unseen ones remain; items already used in this lesson are never reused.
  */
 function excludedItemIds(state: AdaptiveLessonState): string[] {
-  const inSession = sessionItemIds(state);
+  // Items that may not be served in this environment (unreviewed in
+  // production) are excluded outright, whichever engine is asking.
+  const unservable = getBankItems(state.objectiveId)
+    .filter((i) => !isContentServable(getItemReview(i.itemId)))
+    .map((i) => i.itemId);
+  const inSession = [...new Set([...sessionItemIds(state), ...unservable])];
   const withPrior = [...new Set([...inSession, ...state.priorItemIds])];
   return selectAssessmentItem(state.objectiveId, withPrior) ? withPrior : inSession;
 }
@@ -321,6 +329,14 @@ export async function decideNextStep(
       ? getBankItem(activity.config.itemInstanceId)
       : undefined;
 
+  if (
+    action === "independent_check" &&
+    (!bankItem || !isContentServable(getItemReview(bankItem.itemId)))
+  ) {
+    // No improvised or unreviewed question is ever served as a check.
+    throw new UnservableContentError(state.objectiveId);
+  }
+
   let role: StepRole = "teach";
   if (action === "advance") role = "advance";
   else if (action === "pause") role = "pause";
@@ -388,6 +404,13 @@ export function appendStep(state: AdaptiveLessonState, step: DeliveredStep): Ada
         ? state.remediationCycles + 1
         : state.remediationCycles,
   };
+}
+
+export class UnservableContentError extends Error {
+  constructor(objectiveId: string) {
+    super(`No servable authored check is available for ${objectiveId}.`);
+    this.name = "UnservableContentError";
+  }
 }
 
 export class StepResponseError extends Error {

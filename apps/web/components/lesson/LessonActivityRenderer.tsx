@@ -24,11 +24,13 @@ interface LessonActivityRendererProps {
   /** Result of a server-graded check, shown until the learner continues. */
   serverResult?: ServerCheckResult | null;
   onContinue?: () => void;
+  /** Shown under a check's result, e.g. to mark it as practice feedback. */
+  feedbackNote?: string;
 }
 
 function extractSimulation(cfg: LessonActivityConfig): SimulationConfig | null {
   if (cfg.type === "interactive_manipulation") return cfg.simulation;
-  if (cfg.type === "predict_and_observe") return cfg.simulation;
+  if (cfg.type === "predict_and_observe") return cfg.simulation ?? null;
   if (cfg.type === "guided_practice") return cfg.simulation ?? null;
   return null;
 }
@@ -40,6 +42,7 @@ export function LessonActivityRenderer({
   isFinalActivity = false,
   serverResult = null,
   onContinue,
+  feedbackNote,
 }: LessonActivityRendererProps) {
   const { config } = activity;
   const initialSim = extractSimulation(config);
@@ -285,12 +288,14 @@ export function LessonActivityRenderer({
               </p>
             </div>
 
-            <div className="space-y-2">
-              <div className="text-xs font-extrabold text-muted uppercase tracking-wider px-2">
-                Step 2: Verify hands-on in the simulator
+            {config.simulation && (
+              <div className="space-y-2">
+                <div className="text-xs font-extrabold text-muted uppercase tracking-wider px-2">
+                  Step 2: Verify hands-on in the simulator
+                </div>
+                {renderSimulation(config.simulation)}
               </div>
-              {renderSimulation(config.simulation)}
-            </div>
+            )}
 
             <div className="flex justify-end">
               <button
@@ -505,7 +510,7 @@ export function LessonActivityRenderer({
                 disabled={isAnswered || isSubmitting}
                 value={independentAnswer}
                 onChange={(e) => setIndependentAnswer(e.target.value)}
-                placeholder="e.g. 3/4"
+                placeholder="Type a number, e.g. -3 or 3/4"
                 className="w-full px-4 py-3 bg-surface-2 border border-line rounded-xl text-ink font-bold text-base focus:outline-hidden focus:border-primary"
               />
             </div>
@@ -541,6 +546,11 @@ export function LessonActivityRenderer({
                 </span>
               </div>
               <p className="text-sm font-medium leading-relaxed">{shownResult.explanation}</p>
+              {feedbackNote && (
+                <p data-testid="feedback-note" className="text-2xs font-bold opacity-70">
+                  {feedbackNote}
+                </p>
+              )}
             </div>
 
             <div className="flex justify-end">

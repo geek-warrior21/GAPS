@@ -1186,7 +1186,10 @@ describe("Dynamic Teaching Vertical Slice (Maths & Science)", () => {
     // Verify next action recommends taking the fresh check / mastery assessment
     const nextActionBefore = await getRecommendedNextAction(studentId, "science", db);
     expect(nextActionBefore.actionType).toBe("fresh_check");
-    expect(nextActionBefore.lessonId).toBe("lesson-sci-circuits-mastery");
+    // The fresh check now opens the topic's primary lesson, which is engine-driven
+    // and gathers the remaining independent evidence itself. The fixed mastery
+    // lesson below stays reachable by its URL.
+    expect(nextActionBefore.lessonId).toBe("lesson-sci-circuits-adaptive");
 
     // Step 2: Student launches Science Mastery Assessment (lesson-sci-circuits-mastery)
     await startOrResumeLessonSession(studentId, SCI_CIRCUITS_MASTERY_LESSON.lessonId, db);

@@ -5,8 +5,10 @@ import { getCurriculumTopicsOverview } from "@/server/lesson/service";
 
 export async function GET(req: Request) {
   try {
-    await requirePrincipal(req, ["student", "teacher", "staff_admin"]);
-    const overview = await getCurriculumTopicsOverview();
+    const principal = await requirePrincipal(req, ["student", "teacher", "staff_admin"]);
+    const overview = await getCurriculumTopicsOverview(
+      principal.role === "student" ? principal.userId : undefined,
+    );
     return NextResponse.json(overview);
   } catch (err) {
     return errorResponse(err);

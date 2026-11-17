@@ -19,6 +19,7 @@ import {
   type LessonActivity,
   type ActiveBranchState,
   type RecommendedNextAction,
+  type LessonContentStatus,
 } from "@gaps/contracts";
 import {
   getAllCurriculumTopics,
@@ -36,7 +37,14 @@ import {
 } from "@gaps/domain";
 import { getLessonPlanner } from "./planner";
 import { redactActivityForStudent } from "./redact";
-import { getAdaptiveLesson } from "../teaching/adaptive-lessons";
+import { getAdaptiveLesson, getAdaptiveLessonForTopic } from "../teaching/adaptive-lessons";
+import { getAdaptiveLessonAvailability } from "../teaching/availability";
+import { isContentServable, isOpenTopicStudentEntryEnabled, isReviewed } from "../runtime-policy";
+import {
+  isOpenLessonId,
+  respondToOpenLesson,
+  startOrResumeOpenLesson,
+} from "../open-topic/session";
 import { respondToAdaptiveLesson, startOrResumeAdaptiveLesson } from "../teaching/adaptive-session";
 import { generateDomainId } from "../session/engine";
 import { log } from "../log";
@@ -51,6 +59,44 @@ export class LessonServiceError extends Error {
     this.statusCode = statusCode;
     this.code = code;
   }
+}
+
+/**
+ * Content gate for fixed lessons (Non-negotiable 10). The registry's current
+ * review record is the authority; a plan with no record is unreviewed.
+ */
+function assertFixedLessonServable(lessonId: string, plan: LessonPlan | null | undefined): void {
+  const review = getLessonById(lessonId)?.review ?? plan?.review;
+  if (!isContentServable(review)) {
+    log.warn("lesson.fixed.unavailable", { lessonId, reviewStatus: review?.status ?? "missing" });
+    throw new LessonServiceError("This lesson is not available yet.", 404, "LESSON_NOT_AVAILABLE");
+  }
+}
+
+/** Content status of authored material: reviewed, or an authored draft awaiting review. */
+function authoredContentStatus(review: LessonPlan["review"]): LessonContentStatus {
+  return {
+    basis: isReviewed(review) ? "reviewed" : "authored_draft",
+    generatedPreview: false,
+    practiceOnly: false,
+    sources: [],
+  };
+}
+
+/** Whether a lesson id (fixed or engine-driven) may be served in this environment. */
+export function isLessonAvailable(lessonId: string): boolean {
+  const adaptive = getAdaptiveLesson(lessonId);
+  if (adaptive) return getAdaptiveLessonAvailability(adaptive).available;
+  const fixed = getLessonById(lessonId);
+  return fixed !== undefined && isContentServable(fixed.review);
+}
+
+/**
+ * The lesson Learn opens for a topic: the engine-driven lesson where one
+ * exists, otherwise the topic's fixed authored lesson.
+ */
+export function getPrimaryLessonIdForTopic(topic: { id: string; defaultLessonId: string }): string {
+  return getAdaptiveLessonForTopic(topic.id)?.lessonId ?? topic.defaultLessonId;
 }
 
 function resolveActiveActivity(
@@ -294,9 +340,59 @@ export async function recordLessonAssessment(params: RecordLessonAssessmentParam
   };
 }
 
-export async function getCurriculumTopicsOverview(): Promise<CurriculumTopicsResponse> {
-  const topics = getAllCurriculumTopics();
-  return { topics: [...topics] };
+/** Most recent active lesson session per topic id, for one student. */
+async function findActiveLessonSessionsByTopic(
+  studentId: string,
+  db: DbClient,
+): Promise<Map<string, Record<string, unknown>>> {
+  const rows = await db
+    .select()
+    .from(learningSessions)
+    .where(
+      and(
+        eq(learningSessions.studentId, studentId),
+        eq(learningSessions.mode, "lesson"),
+        eq(learningSessions.status, "active"),
+      ),
+    )
+    .orderBy(desc(learningSessions.startedAt));
+  const byTopic = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const counters = (row.counters as Record<string, unknown> | null) ?? {};
+    const topicId = typeof counters.topicId === "string" ? counters.topicId : null;
+    if (topicId && typeof counters.lessonId === "string" && !byTopic.has(topicId)) {
+      byTopic.set(topicId, counters);
+    }
+  }
+  return byTopic;
+}
+
+/**
+ * Curriculum topics with the single lesson Learn should open for each. With a
+ * student id, a lesson already in progress for the topic (fixed or
+ * engine-driven) is resumed instead of starting the primary lesson, so an
+ * earlier session is never orphaned and Learn never offers two lessons.
+ */
+export async function getCurriculumTopicsOverview(
+  studentId?: string,
+  db: DbClient = getDb(),
+): Promise<CurriculumTopicsResponse> {
+  const active = studentId
+    ? await findActiveLessonSessionsByTopic(studentId, db)
+    : new Map<string, Record<string, unknown>>();
+
+  const topics = getAllCurriculumTopics().map((topic) => {
+    const inProgress = active.get(topic.id)?.lessonId;
+    const resumable = typeof inProgress === "string" && isLessonAvailable(inProgress);
+    const entryLessonId = resumable ? (inProgress as string) : getPrimaryLessonIdForTopic(topic);
+    return {
+      ...topic,
+      entryLessonId,
+      entryIsResume: resumable,
+      lessonAvailable: isLessonAvailable(entryLessonId),
+    };
+  });
+  return { topics, openTopicEntry: Boolean(studentId) && isOpenTopicStudentEntryEnabled() };
 }
 
 export async function startOrResumeLessonSession(
@@ -304,10 +400,16 @@ export async function startOrResumeLessonSession(
   lessonId: string,
   db: DbClient = getDb(),
 ): Promise<LessonSessionResponse> {
+  // Open-topic lessons: a topic the learner named, taught as a generated preview.
+  if (isOpenLessonId(lessonId)) {
+    return startOrResumeOpenLesson(studentId, lessonId, db);
+  }
+
   // Engine-driven lessons: each step is chosen by the teaching decision engine.
   const adaptiveLesson = getAdaptiveLesson(lessonId);
   if (adaptiveLesson) {
-    return startOrResumeAdaptiveLesson(studentId, adaptiveLesson, db);
+    const adaptive = await startOrResumeAdaptiveLesson(studentId, adaptiveLesson, db);
+    return { ...adaptive, contentStatus: authoredContentStatus(adaptiveLesson.review) };
   }
 
   // Fixed authored lessons. Answers to assessed checks are removed from the
@@ -315,6 +417,7 @@ export async function startOrResumeLessonSession(
   const data = await startOrResumeFixedLesson(studentId, lessonId, db);
   return {
     ...data,
+    contentStatus: authoredContentStatus(getLessonById(lessonId)?.review),
     lesson: { ...data.lesson, activities: data.lesson.activities.map(redactActivityForStudent) },
     activeActivity: data.activeActivity ? redactActivityForStudent(data.activeActivity) : undefined,
   };
@@ -355,6 +458,8 @@ async function startOrResumeFixedLesson(
   if (!lesson) {
     throw new LessonServiceError(`Lesson ${lessonId} not found`, 404, "LESSON_NOT_FOUND");
   }
+  // Applies to planned, fallback and resumed lessons alike.
+  assertFixedLessonServable(lessonId, lesson);
 
   // 2. Check for an active session with this lessonId
   const existingSessions = await db
@@ -482,6 +587,10 @@ export async function submitLessonActivityResponse(
   response: unknown,
   db: DbClient = getDb(),
 ): Promise<LessonRespondResponse> {
+  if (isOpenLessonId(lessonId)) {
+    return respondToOpenLesson(studentId, lessonId, activityId, response, db);
+  }
+
   const adaptiveLesson = getAdaptiveLesson(lessonId);
   if (adaptiveLesson) {
     return respondToAdaptiveLesson(studentId, adaptiveLesson, activityId, response, db);
@@ -535,6 +644,7 @@ async function submitFixedLessonResponse(
 
   const lessonPlan =
     (session.plan as LessonPlan) ?? getLessonById(lessonId) ?? MATHS_FRAC_PART_LESSON;
+  assertFixedLessonServable(lessonId, lessonPlan);
   const counters = (session.counters as Record<string, unknown>) ?? {};
   const currentActivityIndex =
     typeof counters.currentActivityIndex === "number" ? counters.currentActivityIndex : 0;
@@ -1254,10 +1364,12 @@ export async function getRecommendedNextAction(
       (counters.activeBranch as ActiveBranchState | null)?.stage === "stopping_point";
 
     if (hasStoppingPoint || belief?.status === "needs_support") {
+      // Return to the lesson in progress (fixed or engine-driven) when there is
+      // one; otherwise open the topic's primary lesson.
       const resumeLessonId =
-        counters.adaptive === true && typeof counters.lessonId === "string"
+        typeof counters.lessonId === "string"
           ? counters.lessonId
-          : topic.defaultLessonId;
+          : getPrimaryLessonIdForTopic(topic);
       return {
         actionType: "revisit_unresolved",
         title: `Revisit: ${topic.studentTitle}`,
@@ -1294,11 +1406,9 @@ export async function getRecommendedNextAction(
         (belief && (belief.independentN ?? 0) > 0 && belief.status !== "demonstrated"))
     ) {
       const targetLessonId =
-        counters.adaptive === true && typeof counters.lessonId === "string"
+        typeof counters.lessonId === "string"
           ? counters.lessonId
-          : topic.conceptId === "SCI-ELEC-CIRCUITS"
-            ? "lesson-sci-circuits-mastery"
-            : topic.defaultLessonId;
+          : getPrimaryLessonIdForTopic(topic);
 
       return {
         actionType: "fresh_check",
@@ -1333,7 +1443,7 @@ export async function getRecommendedNextAction(
           objectiveId: nextTopic.conceptId as ConceptId,
           objectiveTitle: nextTopic.studentTitle,
           subject: nextTopic.subject,
-          lessonId: nextTopic.defaultLessonId,
+          lessonId: getPrimaryLessonIdForTopic(nextTopic),
           ctaLabel: "Start Next Objective",
           reasonCode: "CURRENT_OBJECTIVE_MASTERED",
         };
@@ -1350,7 +1460,7 @@ export async function getRecommendedNextAction(
     objectiveId: (firstTopic.conceptId ?? "MATH-FRAC-PART") as ConceptId,
     objectiveTitle: firstTopic.studentTitle,
     subject: firstTopic.subject,
-    lessonId: firstTopic.defaultLessonId,
+    lessonId: getPrimaryLessonIdForTopic(firstTopic),
     ctaLabel: "Start Learning",
     reasonCode: "DEFAULT_START",
   };

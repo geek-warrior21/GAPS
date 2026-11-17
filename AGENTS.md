@@ -2,7 +2,8 @@
 
 You are building Gaps, a dynamic teaching system for Class 6–8 maths and science.
 The current demonstration content is Class 6 fractions and circuits. The full
-specification is docs/SPEC.md; Appendix F supersedes the original maths-only scope.
+specification is docs/SPEC.md; Appendix F supersedes the original maths-only scope and
+Appendix G (open-topic teaching) supersedes the requirement to author every topic by hand.
 Read the specification before implementing product changes.
 Spec precedence when sections disagree:
 invariants + safety (§10, §12) > build specs (§14–27) > design (§7–13) > narrative (§1–6)

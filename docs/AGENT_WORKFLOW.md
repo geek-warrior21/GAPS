@@ -107,6 +107,21 @@ network remote separately only when needed and authorized. For later handoffs,
 fetch the transferred branch from the next bundle into the existing repository,
 inspect the diff and preserve local work before changing branches.
 
+**ZIP handoff (current method, chosen by Gyan):** Git is not required. After the
+required checks pass, the outgoing agent updates the handoff and delivers one
+archive named `GAPS-<agent>-<NNN>.zip` (for example `GAPS-clau-001.zip`).
+
+- The archive holds the full source tree under a top-level `GAPS-main/` folder.
+- It excludes `.git`, `node_modules`, `.next`, `.env*` except `.env.example`,
+  `test-results`, `playwright-report`, `coverage`, `*.tsbuildinfo`,
+  `next-env.d.ts` and `.DS_Store`. Never include secrets, database dumps or
+  student data.
+- The handoff names the archive, the base it continues from and the checks run
+  on exactly that tree. Report the archive's SHA-256 alongside it, not inside it.
+- The incoming agent unpacks into a NEW directory, runs the fresh-device
+  bootstrap and baseline, and compares the result with the handoff before
+  editing. Any earlier archive remains the fallback.
+
 ## Fresh-device bootstrap
 
 Use the Node version in `.node-version`, compatible pnpm from `package.json`, and

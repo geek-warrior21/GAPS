@@ -1581,3 +1581,91 @@ The dynamic teaching vertical slice introduces interactive, versioned, multi-sub
 - **Rule F.2 (Universal State Persistence)**: Every activity completion or answer is persisted to session storage immediately. Browser reload resumes the student at their exact activity index with previously entered responses restored.
 - **Rule F.3 (Graceful Fallback)**: Any unparseable, malformed, or missing lesson plan automatically falls back to a verified authored default without throwing 500 errors.
 
+## Appendix G  Open-Topic Teaching (Product Direction Update, 2026-11-16)
+
+This appendix supersedes the requirement that every new topic be authored by hand. It does not
+remove anything authored: existing sessions, evidence, simulations, fixed lessons and engine-driven
+lessons are preserved, and Sections 10 and 12 (invariants and safety) still take precedence.
+
+### G.1 Direction
+
+Gaps is an LLM-powered adaptive teaching experience for any school maths or science topic,
+initially Classes 6–8. Confirmed decisions:
+
+1. A student can enter a topic in their own words, with a school level.
+2. The model composes tested activity components by supplying their configuration.
+3. The model never generates executable widgets, markup or code.
+4. Approved sources are used when available.
+5. Otherwise teaching from model knowledge is allowed, clearly labelled as a generated preview.
+
+### G.2 Rules
+
+- **G.1 (No per-topic code).** A topic needs no source file, enum entry, concept id or page before a
+  preview session can start. A topic is a string.
+- **G.2 (Authored first).** When a request is exactly a topic with an authored lesson, that lesson is
+  opened. A neighbouring authored topic is never substituted for a different request.
+- **G.3 (Clarify only when ambiguous).** At most one short clarification question, and only when the
+  request could mean clearly different topics.
+- **G.4 (Short opening, then step by step).** The model chooses a 2–3 step opening, then one step at
+  a time from the learner's responses. It does not generate a whole lesson in advance.
+- **G.5 (Server envelope).** The server decides which teaching actions are eligible at each step.
+  Pause and closing steps are written by the server. The model cannot advance an objective, declare
+  mastery or change grading.
+- **G.6 (Tested components only).** Generated steps are structured configurations validated against
+  the activity catalogue. A simulation may be used only where a tested one is relevant to the topic.
+  When the ideal interaction is unavailable the model uses a supported alternative, may name what it
+  would have used, and must not describe or promise an interaction the player lacks.
+- **G.7 (Content status).** Every lesson carries a content basis: `reviewed`, `authored_draft`,
+  `source_grounded` or `model_knowledge`. Grounding in a source is not review. Source references are
+  attached by the server from the sources it supplied; the model cannot write citations, and
+  citation-like text is rejected.
+- **G.8 (Proposals are not facts).** Prerequisites and misconceptions proposed by the model are stored
+  as model proposals, separate from verified curriculum edges and from demonstrated learner evidence.
+  An incorrect answer to a generated question is never treated as a definite misconception.
+- **G.9 (Practice, not mastery).** Responses to generated questions are graded on the server and give
+  provisional practice feedback. They are stored as events, not attempts, never reach the belief
+  reducer, and award no Sparks. Where the server can recompute a numeric answer key with exact
+  arithmetic it does, rejects a key that disagrees, and records the key as deterministically
+  verified; this still does not make the response mastery evidence. Verified evidence comes only from
+  reviewed-path authored items through the existing reducer.
+- **G.10 (Reliability).** Each accepted activity is stored before it is shown. Refresh, retry and pause
+  reuse stored state. A provider failure keeps the learner's response and offers a retry; an authored
+  lesson is offered only when one exists for the same topic. An unrelated topic is never substituted.
+- **G.11 (Privacy and consent).** A model is called for a student only when the AI runtime is on, the
+  kill switch is off, the class has AI enabled, the student has the `ai_free_text` scope and the daily
+  budget is not spent. These are read fresh on every call. Nothing identifying the learner is sent;
+  the topic text has contact details removed. Call logs hold metadata only.
+- **G.12 (Review restrictions stand).** Generated previews are unreviewed content. They are not
+  offered where unreviewed content may not be served (production) until a separate release decision
+  changes Non-negotiable 10.
+
+- **G.13 (Developer preview first).** Open-topic teaching is first released in the protected
+  developer preview (`/dev/open-topic`), run by a staff admin as a synthetic learner: a placeholder
+  account with no class, credential, consent record or personal data. The per-student consent
+  controls of G.11 do not apply to that account and continue to guard every student-facing path. The
+  student-facing entry is off unless `OPEN_TOPIC_STUDENT_ENTRY=true`, and is never available in
+  production.
+
+### G.3 Interfaces
+
+- Developer preview, all behind the developer-tools gate (404 in production or when not enabled, 401
+  unauthenticated, 403 for students and teachers): `GET|POST /api/v1/dev/open-topic` (provider
+  readiness; start a lesson), and `POST …/{lessonId}/start`, `POST …/{lessonId}/respond`,
+  `POST …/{lessonId}/autoplay`, `GET …/{lessonId}/trace`.
+
+- `POST /api/v1/open-lessons` (students only, core consent required). Request: `{ topic, level: 6|7|8,
+  clarification? }`. Response `status`: `ready` (`lessonId`, `title`, `contentStatus`),
+  `needs_clarification` (`question`, `options`), or `unavailable` (`reason`, `message`, `retryable`).
+- The lesson is then served by the existing lesson endpoints and player under the id
+  `open-<sessionId>`. Session responses carry `contentStatus` and, when a next step could not be
+  prepared, `adaptive.awaitingNextStep`.
+- Model purposes `lesson_open` and `lesson_step` are added to the provider interface.
+
+### G.4 Demonstration requirement
+
+Live generation is demonstrated with a real provider and synthetic learner profiles on topics outside
+the authored examples (photosynthesis, states of matter, negative numbers), with one lesson changing
+direction after a response and no topic-specific implementation. `pnpm demo:open-topic` runs this and
+writes `docs/demos/open-topic-live-demo.md`. Mock or scripted providers test the wiring only and are
+never reported as a demonstration.
+

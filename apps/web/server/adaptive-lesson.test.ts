@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { isAiRuntimeEnabled } from "@gaps/ai";
 import {
   getDb,
   users,
@@ -700,6 +701,30 @@ describe("Engine-driven lesson sessions (persisted student journeys)", () => {
       expect(seenInputs.every((i) => i.objectiveStatus !== undefined)).toBe(true);
       expect(JSON.stringify(seenInputs)).not.toContain(studentId);
     });
+  });
+
+  it("real student sessions never call a model, even when the AI runtime is switched on", async () => {
+    // Model calls for real students stay off until the per-student consent
+    // scope and class controls are enforced (Non-negotiable 6).
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    vi.stubEnv("AI_ZDR_CONFIRMED", "true");
+    try {
+      expect(isAiRuntimeEnabled()).toBe(true);
+      const studentId = await createStudent("noai");
+      const start = await startOrResumeLessonSession(studentId, FRACTIONS, db);
+      const r1 = await answer(studentId, FRACTIONS, start.activeActivity!);
+      const check = r1.activeActivity!;
+      await answer(studentId, FRACTIONS, check, correct(check, 1));
+
+      const traces = await tracesFor(studentId, start.session.id);
+      expect(traces.length).toBe(3);
+      for (const trace of traces) {
+        expect(trace.provider).toBe("authored");
+        expect((trace.result as { model: string | null }).model).toBeNull();
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("unreadable stored lesson state falls back to a fresh authored session instead of failing", async () => {

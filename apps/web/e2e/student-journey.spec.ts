@@ -376,18 +376,9 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await page.click("button[type='submit']");
     await expect(page).toHaveURL(/\/home/);
 
-    // 2. Navigate to Learn and switch to Science
-    await page.goto("/learn");
-    await expect(page).toHaveURL(/\/learn/);
-
-    const scienceTab = page.locator("[data-testid='tab-subject-science']");
-    await expect(scienceTab).toBeVisible();
-    await scienceTab.click();
-
-    // 3. Launch Science Lesson: Electric Current & Simple Circuits
-    const launchBtn = page.locator("[data-testid='start-circuits-lesson-button']");
-    await expect(launchBtn).toBeVisible();
-    await launchBtn.click();
+    // Learn now opens the engine-driven lesson for this topic. This journey covers
+    // the fixed authored lesson, which stays available at its own URL.
+    await page.goto("/lesson/lesson-sci-circuits-1");
     await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-1/);
 
     // Step 1: Intro activity
@@ -450,13 +441,9 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await page.click("button[type='submit']");
     await expect(page).toHaveURL(/\/home/);
 
-    // 2. Navigate to Learn and launch Fractions lesson
-    await page.goto("/learn");
-    await expect(page).toHaveURL(/\/learn/);
-
-    const launchMathsBtn = page.locator("[data-testid='start-maths-lesson-button']");
-    await expect(launchMathsBtn).toBeVisible();
-    await launchMathsBtn.click();
+    // Learn now opens the engine-driven lesson for this topic. This journey covers
+    // the fixed authored lesson, which stays available at its own URL.
+    await page.goto("/lesson/lesson-maths-frac-part-1");
     await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
 
     // Step 1: Intro
@@ -473,6 +460,23 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
 
     // Step 3: Test Reload & Resume Progress
     await page.reload();
+    await expect(page.getByText("ACTIVITY 3 OF 5")).toBeVisible();
+    await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
+
+    // Learn offers exactly one way into this topic. With a fixed lesson in
+    // progress it continues that lesson rather than starting a second one.
+    await page.goto("/learn");
+    const continueBtn = page.locator("[data-testid='start-maths-lesson-button']");
+    await expect(continueBtn).toHaveText(/Continue Lesson/);
+    await expect(continueBtn).toHaveAttribute("href", "/lesson/lesson-maths-frac-part-1");
+    // Every link into this topic (entry button and any recommendation banner)
+    // leads to that same lesson: no second, competing lesson is offered.
+    const topicLinks = await page
+      .locator("a[href^='/lesson/lesson-maths-frac-part']")
+      .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+    expect(new Set(topicLinks)).toEqual(new Set(["/lesson/lesson-maths-frac-part-1"]));
+    await continueBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
     await expect(page.getByText("ACTIVITY 3 OF 5")).toBeVisible();
     await expect(page.getByText("Predict & Observe", { exact: true })).toBeVisible();
 
@@ -578,13 +582,9 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await page.click("button[type='submit']");
     await expect(page).toHaveURL(/\/home/);
 
-    // 2. Navigate to Learn and launch Fractions lesson
-    await page.goto("/learn");
-    await expect(page).toHaveURL(/\/learn/);
-
-    const launchMathsBtn = page.locator("[data-testid='start-maths-lesson-button']");
-    await expect(launchMathsBtn).toBeVisible();
-    await launchMathsBtn.click();
+    // Learn now opens the engine-driven lesson for this topic. This journey covers
+    // the fixed authored lesson, which stays available at its own URL.
+    await page.goto("/lesson/lesson-maths-frac-part-1");
     await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
 
     // Step 1: Intro
@@ -690,16 +690,10 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await page.click("button[type='submit']");
     await expect(page).toHaveURL(/\/home/);
 
-    // 2. Navigate to Learn -> Science
-    await page.goto("/learn");
-    const scienceTab = page.locator("[data-testid='tab-subject-science']");
-    await expect(scienceTab).toBeVisible();
-    await scienceTab.click();
-
-    // 3. Launch Circuits Lesson
-    const launchBtn = page.locator("[data-testid='start-circuits-lesson-button']");
-    await expect(launchBtn).toBeVisible();
-    await launchBtn.click();
+    // Learn now opens the engine-driven lesson for this topic. This journey covers
+    // the fixed authored lesson, which stays available at its own URL.
+    await page.goto("/lesson/lesson-sci-circuits-1");
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-1/);
 
     // Step 1: Intro & Step 2: Interactive Sandbox
     await expect(page.getByText("Concept Introduction", { exact: true })).toBeVisible();
@@ -774,13 +768,9 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await page.click("button[type='submit']");
     await expect(page).toHaveURL(/\/home/);
 
-    // 2. Navigate to Learn and launch Fractions lesson
-    await page.goto("/learn");
-    await expect(page).toHaveURL(/\/learn/);
-
-    const launchMathsBtn = page.locator("[data-testid='start-maths-lesson-button']");
-    await expect(launchMathsBtn).toBeVisible();
-    await launchMathsBtn.click();
+    // Learn now opens the engine-driven lesson for this topic. This journey covers
+    // the fixed authored lesson, which stays available at its own URL.
+    await page.goto("/lesson/lesson-maths-frac-part-1");
     await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-1/);
 
     // Step 1: Intro
@@ -840,7 +830,7 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page.getByText("Let's Pause & Review Key Ideas")).toBeVisible();
   });
 
-  test("S17: Science student completes Circuit Simulator, takes Mastery Assessment across 2 templates, and demonstrates mastery (+20 Sparks)", async ({
+  test("S17: Science student completes the fixed circuits lesson, follows the fresh-check recommendation into the engine-driven lesson, and demonstrates mastery across 2 templates", async ({
     page,
   }, testInfo) => {
     const isMobile = testInfo.project.name.includes("Mobile");
@@ -859,18 +849,9 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await page.click("button[type='submit']");
     await expect(page).toHaveURL(/\/home/);
 
-    // 2. Navigate to Learn and switch to Science
-    await page.goto("/learn");
-    await expect(page).toHaveURL(/\/learn/);
-
-    const scienceTab = page.locator("[data-testid='tab-subject-science']");
-    await expect(scienceTab).toBeVisible();
-    await scienceTab.click();
-
-    // 3. Launch Electric Circuits Topic 1 (lesson-sci-circuits-1)
-    const launchCircuitsBtn = page.locator("[data-testid='start-circuits-lesson-button']");
-    await expect(launchCircuitsBtn).toBeVisible();
-    await launchCircuitsBtn.click();
+    // 2. Start with the fixed circuits lesson at its own URL. It yields one
+    // independent correct answer, which is not enough to demonstrate the objective.
+    await page.goto("/lesson/lesson-sci-circuits-1");
     await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-1/);
 
     // Activity 1: Intro -> click Let's Explore
@@ -922,42 +903,38 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(nextActionCard).toBeVisible();
     await expect(page.getByText("Action on Return: Fresh Check")).toBeVisible();
 
-    // Launch Mastery Assessment via Next Action Button
+    // The fresh check opens the topic's primary, engine-driven lesson
     const nextActionBtn = page.locator("[data-testid='next-action-button']");
     await expect(nextActionBtn).toBeVisible();
     await nextActionBtn.click();
-    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-mastery/);
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-adaptive/);
+    await expect(page.locator("[data-testid='adaptive-step-label']")).toHaveText("STEP 1");
+    await page.click("button:has-text('Next Step')");
 
-    // Mastery Lesson: Activity 1: Intro -> click Let's Explore
-    await expect(page.getByRole("heading", { name: "Circuit Mastery Check" })).toBeVisible();
-    await page.click('button:has-text("Let\'s Explore")');
-
-    // Mastery Lesson: Activity 2: Independent Check 2 (Template 1: Continuity, Item 2: Open Switch Air Gap)
-    await expect(
-      page.getByRole("heading", { name: "Independent Check: Open Switch Air Gap" }),
-    ).toBeVisible();
-    const airGapChoice = page.locator("button:has-text('The open switch creates an air gap')");
-    await expect(airGapChoice).toBeVisible();
-    await airGapChoice.click();
+    // Independent check 2 (a different item, same template family)
+    await page
+      .locator(
+        "button:has-text('It goes dark, because the open switch leaves a gap the current cannot cross')",
+      )
+      .click();
     await page.click("button:has-text('Submit Answer')");
     await expect(page.getByText("Correct Response!")).toBeVisible();
-    // The check was graded by the server on "Submit Answer"; this moves on.
     await page.click("[data-testid='check-continue-button']");
 
-    // Mastery Lesson: Activity 3: Independent Check 3 (Template 2: Breaks, Item 3: Detecting Circuit Breaks)
-    await expect(
-      page.getByRole("heading", { name: "Independent Check: Detecting Circuit Breaks" }),
-    ).toBeVisible();
-    const wireBreakChoice = page.locator(
-      "button:has-text('Current stops flowing completely and the bulb turns off immediately')",
-    );
-    await expect(wireBreakChoice).toBeVisible();
-    await wireBreakChoice.click();
+    // Still not demonstrated: two independent correct answers so far
+    await expect(page.locator("[data-testid='adaptive-step-label']")).toHaveText("STEP 3");
+    await expect(page.getByText("Mastery Demonstrated")).toHaveCount(0);
+
+    // Independent check 3 (second template). With the fixed lesson's answer this
+    // makes three distinct items across two templates, all unassisted.
+    await page.locator("button:has-text('The bulb goes off, because the loop is broken')").click();
     await page.click("button:has-text('Submit Answer')");
     await expect(page.getByText("Correct Response!")).toBeVisible();
-    await page.click("button:has-text('Complete Lesson & Collect Sparks')");
+    await page.click("[data-testid='check-continue-button']");
 
-    // Mastery Lesson Completed Screen
+    // The belief reducer reports demonstrated -> milestone, then completion
+    await expect(page.getByText("Mastery Demonstrated: Electric Circuits!")).toBeVisible();
+    await page.click("button:has-text('Finish Lesson')");
     await expect(page.getByText("Outstanding Effort!")).toBeVisible();
     await page.click("button:has-text('Return to Curriculum')");
     await expect(page).toHaveURL(/\/learn/);
@@ -968,167 +945,6 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(
       page.getByRole("heading", { name: "Next Objective: Conductors and insulators" }),
     ).toBeVisible();
-  });
-
-  test("S18: Developer-only lesson-planning preview produces multi-stage validated plans and renders in preview player", async ({
-    page,
-  }) => {
-    // 1. Visit dev lesson planner
-    await page.goto("/dev/lesson-planner");
-    await expect(
-      page.getByRole("heading", { name: "Model-Planned Teaching Engine: Live Preview" }),
-    ).toBeVisible();
-    await expect(page.getByText("Developer Mode")).toBeVisible();
-
-    // 2. Select Science and Struggling Profile with AIR_GAP misconception
-    await page.locator("[data-testid='select-subject-science']").click();
-    await page.locator("[data-testid='profile-struggling']").click();
-
-    const misconceptionSelect = page.locator("[data-testid='select-misconception']");
-    await expect(misconceptionSelect).toBeVisible();
-    await misconceptionSelect.selectOption("AIR_GAP");
-
-    // 3. Generate Lesson Plan
-    const generateBtn = page.locator("[data-testid='generate-plan-button']");
-    await expect(generateBtn).toBeVisible();
-    await generateBtn.click();
-
-    // 4. Verify Audit Panel and Multi-stage Validation Badges
-    const auditPanel = page.locator("[data-testid='planner-audit-panel']");
-    await expect(auditPanel).toBeVisible();
-    await expect(page.locator("[data-testid='badge-generation-model']")).toBeVisible();
-    await expect(page.locator("[data-testid='badge-generation-latency']")).toBeVisible();
-
-    // Validation distinctions
-    await expect(page.locator("[data-testid='val-schema-card']")).toContainText(
-      "✓ Schema Valid (Zod)",
-    );
-    await expect(page.locator("[data-testid='val-factual-card']")).toContainText(
-      "✓ Factual Integrity Valid",
-    );
-    await expect(page.locator("[data-testid='val-pedagogical-card']")).toContainText(
-      "✓ Tailored: struggling",
-    );
-
-    // 5. Verify sandboxed preview player is rendered
-    const previewPlayer = page.locator("[data-testid='preview-lesson-player']");
-    await expect(previewPlayer).toBeVisible();
-    await expect(page.getByText("Interactive Lesson Player Preview")).toBeVisible();
-
-    // Click "Let's Explore" inside preview player to verify interactive operation
-    await previewPlayer.locator('button:has-text("Let\'s Explore")').click({ force: true });
-    await expect(previewPlayer.getByText("Interactive Exploration", { exact: true })).toBeVisible();
-
-    // 6. Test Challenge Profile Generation
-    await page.locator("[data-testid='profile-challenge']").click({ force: true });
-    await generateBtn.click({ force: true });
-    await expect(page.locator("[data-testid='val-pedagogical-card']")).toContainText(
-      "✓ Tailored: ready_for_challenge",
-    );
-    await expect(page.getByText("Interactive Lesson Player Preview")).toBeVisible();
-  });
-
-  test("S19: Developer teaching-engine comparison demonstrates distinct adaptive sequences for struggling vs succeeding learners with server policy envelopes", async ({
-    page,
-  }) => {
-    // 1. Visit dev lesson planner
-    await page.goto("/dev/lesson-planner");
-    await expect(
-      page.getByRole("heading", { name: "Model-Planned Teaching Engine: Live Preview" }),
-    ).toBeVisible();
-
-    // 2. Switch to Next-Step Teaching Decision Comparison tab
-    const traceTab = page.locator("[data-testid='tab-view-teaching-trace']");
-    await expect(traceTab).toBeVisible();
-    await traceTab.click();
-
-    // 3. Verify comparison controls
-    await expect(page.getByRole("heading", { name: "Teaching Decision Comparison" })).toBeVisible();
-    const runBtn = page.locator("[data-testid='run-comparison-button']");
-    await expect(runBtn).toBeVisible();
-
-    // 4. Run comparison for default Maths (MATH-FRAC-PART)
-    await runBtn.click();
-
-    // 5. Verify side-by-side results container rendered
-    const resultsContainer = page.locator("[data-testid='comparison-results-container']");
-    await expect(resultsContainer).toBeVisible();
-
-    // The comparison replays the same sequencer as persisted student sessions,
-    // so every delivered step is listed, including the checks themselves.
-    const step = (learner: "struggling" | "succeeding", n: number) =>
-      page.locator(`[data-testid='trace-${learner}-step-${n}']`);
-
-    // Verify Learner A (Struggling) Column
-    await expect(page.getByText("Learner A: Struggling")).toBeVisible();
-    await expect(page.getByText("Scaffolded Adaptive Interventions")).toBeVisible();
-    await expect(step("struggling", 1)).toContainText("Action: explore");
-    // Step 2: first unassisted check, answered with the reversal distractor
-    await expect(step("struggling", 2)).toContainText("Action: independent_check");
-    await expect(step("struggling", 2)).toContainText("Check recorded as: independent");
-    // Step 3: targeted fraction manipulation triggered by the REVERSAL misconception
-    await expect(step("struggling", 3)).toContainText("Action: explore");
-    await expect(step("struggling", 3)).toContainText("Misconception Detected: REVERSAL");
-    await expect(step("struggling", 4)).toContainText("Action: guided_practice");
-    // Step 5: supported check straight after remediation is recorded as assisted
-    await expect(step("struggling", 5)).toContainText("Action: independent_check");
-    await expect(step("struggling", 5)).toContainText("assisted (cannot count toward mastery)");
-    // Step 6: ambiguous error -> diagnostic probe, which is not evidence
-    await expect(step("struggling", 6)).toContainText("Action: independent_check");
-    await expect(step("struggling", 6)).toContainText(
-      "Ambiguous Error → Diagnostic Probe Activated",
-    );
-    await expect(step("struggling", 6)).toContainText("not evidence");
-    // Step 7: alternative explanation after continued difficulty
-    await expect(step("struggling", 7)).toContainText("Action: explain");
-    await expect(step("struggling", 8)).toContainText("Action: independent_check");
-    // Final step 9: pause (bounded remediation loop)
-    await expect(step("struggling", 9)).toContainText("Action: pause");
-    await expect(step("struggling", 10)).toHaveCount(0);
-    await expect(page.getByText("Status: paused_at_stopping_point")).toBeVisible();
-
-    // Verify Learner B (Succeeding) Column
-    await expect(page.getByText("Learner B: Succeeding Independently")).toBeVisible();
-    await expect(page.getByText("Independent Mastery & Progression")).toBeVisible();
-    await expect(step("succeeding", 1)).toContainText("Action: explore");
-    await expect(step("succeeding", 2)).toContainText("Action: independent_check");
-    await expect(step("succeeding", 3)).toContainText("Action: independent_check");
-    // Step 4: two correct answers move the lesson on, but the objective is not
-    // advanced. The belief reducer still reports "developing" and the server
-    // envelope does not offer advance.
-    await expect(step("succeeding", 4)).toContainText("Action: independent_check");
-    await expect(step("succeeding", 4)).toContainText(
-      "Objective status (belief reducer): developing",
-    );
-    await expect(step("succeeding", 4)).toContainText("ready_for_demonstration_check");
-    await expect(step("succeeding", 4)).not.toContainText("Action: advance");
-    // Step 5: advance, authorized only once the belief reducer reports demonstrated
-    await expect(step("succeeding", 5)).toContainText("Action: advance");
-    await expect(step("succeeding", 5)).toContainText(
-      "Objective status (belief reducer): demonstrated",
-    );
-    await expect(page.getByText("Status: mastery_demonstrated_advanced")).toBeVisible();
-
-    // 6. Test Step Preview interactivity
-    const previewBtn = page.locator("[data-testid='preview-activity-struggling-3']");
-    await expect(previewBtn).toBeVisible();
-    await previewBtn.click();
-
-    // Verify preview lesson player mounts with the selected step activity
-    const previewPlayer = page.locator("[data-testid='preview-lesson-player']");
-    await expect(previewPlayer).toBeVisible();
-    await expect(page.getByText("Close Step Preview")).toBeVisible();
-
-    // 7. Test Science Objective (SCI-ELEC-CIRCUITS)
-    await page.locator("[data-testid='trace-subject-science']").click();
-    await runBtn.click();
-
-    // Verify science trace shows circuit exploration, AIR_GAP remediation, and advance
-    await expect(step("struggling", 3)).toContainText("Misconception Detected: AIR_GAP");
-    await expect(step("struggling", 3)).toContainText("Testing the Open Switch Air Gap");
-    await expect(step("struggling", 9)).toContainText("Action: pause");
-    await expect(step("succeeding", 4)).not.toContainText("Action: advance");
-    await expect(step("succeeding", 5)).toContainText("Action: advance");
   });
 
   // ===========================================================================
@@ -1200,8 +1016,16 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     const payloads = recordLessonPayloads(page);
     await signIn(page, learner.username, learner.pin);
 
+    // Learn offers one lesson for this topic and it is the engine-driven one
     await page.goto("/learn");
-    await page.locator("[data-testid='start-maths-adaptive-lesson-button']").click();
+    const startBtn = page.locator("[data-testid='start-maths-lesson-button']");
+    await expect(startBtn).toHaveText(/Start Lesson/);
+    const mathsLinks = await page
+      .locator("a[href^='/lesson/lesson-maths-frac-part']")
+      .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+    expect(new Set(mathsLinks)).toEqual(new Set(["/lesson/lesson-maths-frac-part-adaptive"]));
+    await expect(page.locator("[data-testid='link-dev-planner']")).toHaveCount(0);
+    await startBtn.click();
     await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-adaptive/);
 
     // Step 1: opening exploration chosen by the engine
@@ -1256,7 +1080,13 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
 
     await page.goto("/learn");
     await page.locator("[data-testid='tab-subject-science']").click();
-    await page.locator("[data-testid='start-circuits-adaptive-lesson-button']").click();
+    const startBtn = page.locator("[data-testid='start-circuits-lesson-button']");
+    await expect(startBtn).toHaveText(/Start Lesson/);
+    const circuitLinks = await page
+      .locator("a[href^='/lesson/lesson-sci-circuits']")
+      .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+    expect(new Set(circuitLinks)).toEqual(new Set(["/lesson/lesson-sci-circuits-adaptive"]));
+    await startBtn.click();
     await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-adaptive/);
 
     // Step 1: opening exploration
@@ -1345,7 +1175,10 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await resetStudentEvidence([learner.studentId]);
     await signIn(page, learner.username, learner.pin);
 
-    await page.goto("/lesson/lesson-sci-circuits-adaptive");
+    await page.goto("/learn");
+    await page.locator("[data-testid='tab-subject-science']").click();
+    await page.locator("[data-testid='start-circuits-lesson-button']").click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-sci-circuits-adaptive/);
     await expect(stepLabel(page)).toHaveText("STEP 1");
     await page.click("button:has-text('Next Step')");
 
@@ -1382,7 +1215,9 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await resetStudentEvidence([learner.studentId]);
     await signIn(page, learner.username, learner.pin);
 
-    await page.goto("/lesson/lesson-maths-frac-part-adaptive");
+    await page.goto("/learn");
+    await page.locator("[data-testid='start-maths-lesson-button']").click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-adaptive/);
     await expect(stepLabel(page)).toHaveText("STEP 1");
     await page.click("button:has-text('Next Step')");
 
@@ -1410,10 +1245,91 @@ test.describe("Student Learning Journey & Acceptance Scenarios", () => {
     await expect(page.getByText("Independent Check", { exact: true })).toBeVisible();
     await expect(page.getByText("Mastery Demonstrated")).toHaveCount(0);
 
-    // Leaving and returning resumes the same step
+    // Leaving and returning through Learn resumes the same step
     await page.goto("/learn");
-    await page.goto("/lesson/lesson-maths-frac-part-adaptive");
+    const continueBtn = page.locator("[data-testid='start-maths-lesson-button']");
+    await expect(continueBtn).toHaveText(/Continue Lesson/);
+    await continueBtn.click();
+    await expect(page).toHaveURL(/\/lesson\/lesson-maths-frac-part-adaptive/);
     await expect(stepLabel(page)).toHaveText("STEP 6");
     await expect(page.getByText("A chocolate bar has 8 equal pieces.")).toBeVisible();
+  });
+
+  test("S25: Open topics are in developer preview: students see no any-topic entry and the API refuses them", async ({
+    page,
+  }, testInfo) => {
+    const learner = adaptiveLearner(testInfo.project.name);
+    await signIn(page, learner.username, learner.pin);
+    await page.goto("/learn");
+    await expect(page.locator("[data-testid='start-maths-lesson-button']")).toBeVisible();
+    await expect(page.locator("[data-testid='open-topic-card']")).toHaveCount(0);
+
+    for (const topic of ["photosynthesis", "fractions"]) {
+      const res = await page.request.post("/api/v1/open-lessons", { data: { topic, level: 7 } });
+      expect(res.status()).toBe(200);
+      expect(await res.json()).toMatchObject({
+        status: "unavailable",
+        reason: "preview_not_allowed",
+      });
+    }
+  });
+
+  test("S24: Developer tools do not exist in the production build for anyone, and Learn does not link to them", async ({
+    page,
+  }, testInfo) => {
+    const devApis: Array<[string, unknown]> = [
+      [
+        "/api/v1/dev/lesson-planner/generate",
+        {
+          subject: "maths",
+          level: 6,
+          topicId: "maths-frac-part",
+          objectiveId: "MATH-FRAC-PART",
+          learnerProfile: { profileType: "struggling", namedMisconception: "REVERSAL" },
+        },
+      ],
+      ["/api/v1/dev/teaching-engine/step", { objectiveId: "MATH-FRAC-PART", subject: "maths" }],
+      ["/api/v1/dev/teaching-engine/compare", { subject: "maths", objectiveId: "MATH-FRAC-PART" }],
+      ["/api/v1/dev/open-topic", { topic: "photosynthesis", level: 7 }],
+      ["/api/v1/dev/open-topic/open-ses_none/start", {}],
+      ["/api/v1/dev/open-topic/open-ses_none/respond", { activityId: "x", response: {} }],
+      ["/api/v1/dev/open-topic/open-ses_none/autoplay", { profile: "succeeding" }],
+    ];
+
+    const expectNoDevTools = async (who: string) => {
+      for (const devPage of ["/dev/open-topic", "/dev/lesson-planner"]) {
+        const pageRes = await page.goto(devPage);
+        expect(pageRes?.status(), `${who}: ${devPage}`).toBe(404);
+      }
+      await expect(page.getByText("Model-Planned Teaching Engine")).toHaveCount(0);
+      await expect(page.locator("[data-testid='run-comparison-button']")).toHaveCount(0);
+
+      for (const [url, data] of devApis) {
+        const res = await page.request.post(url, { data });
+        expect(res.status(), `${who}: ${url}`).toBe(404);
+        const body = await res.text();
+        expect(body).not.toContain("correctAnswer");
+        expect(body).not.toContain("eligibleActions");
+      }
+    };
+
+    // Unauthenticated
+    await expectNoDevTools("anonymous");
+
+    // Student
+    const learner = adaptiveLearner(testInfo.project.name);
+    await signIn(page, learner.username, learner.pin);
+    await expectNoDevTools("student");
+    await page.goto("/learn");
+    await expect(page.locator("[data-testid='link-dev-planner']")).toHaveCount(0);
+    await expect(page.locator("a[href^='/dev']")).toHaveCount(0);
+
+    // Staff admin: still nothing in production
+    await page.context().clearCookies();
+    const login = await page.request.post("/api/v1/auth/staff-login", {
+      data: { email: "admin@demo.gaps", password: "AdminDemo2026!" },
+    });
+    expect(login.status()).toBe(200);
+    await expectNoDevTools("staff admin");
   });
 });

@@ -10,10 +10,17 @@ import type {
   LessonActivity,
 } from "@gaps/contracts";
 import { LessonActivityRenderer } from "./LessonActivityRenderer";
+import messages from "@/messages/en.json";
 
 interface LessonPlayerProps {
   initialData: LessonSessionResponse;
   isPreview?: boolean;
+  /** Base path of the lesson endpoints. The developer preview supplies its own. */
+  endpointBase?: string;
+  /** Where "back" and "finish" lead. */
+  exitHref?: string;
+  /** Called after each stored response, e.g. to refresh a developer trace. */
+  onProgress?: () => void;
 }
 
 function evaluatePreviewActivityResponse(
@@ -145,7 +152,13 @@ function evaluatePreviewActivityResponse(
   };
 }
 
-export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerProps) {
+export function LessonPlayer({
+  initialData,
+  isPreview = false,
+  endpointBase = "/api/v1/lessons",
+  exitHref = "/learn",
+  onProgress,
+}: LessonPlayerProps) {
   const router = useRouter();
   const [sessionData, setSessionData] = useState<LessonSessionResponse>(initialData);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -155,6 +168,27 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
 
   const { lesson, currentActivityIndex, isCompleted } = sessionData;
   const adaptive = sessionData.adaptive;
+  const contentStatus = sessionData.contentStatus;
+  // A model-generated lesson: labelled as a preview, and practice only.
+  const isGeneratedPreview = contentStatus?.generatedPreview === true;
+  const isPracticeOnly = contentStatus?.practiceOnly === true;
+  const isAwaitingNextStep = adaptive?.awaitingNextStep === true && !isCompleted;
+
+  // Asks the server again for a next step that could not be prepared earlier.
+  const handleRetryNextStep = async () => {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`${endpointBase}/${lesson.lessonId}/start`, { method: "POST" });
+      if (!res.ok) throw new Error(messages.openTopic.genericError);
+      setSessionData((await res.json()) as LessonSessionResponse);
+      onProgress?.();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : messages.openTopic.genericError);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const currentActivity = sessionData.activeActivity ?? lesson.activities[currentActivityIndex];
   const isFinalActivity = adaptive
     ? adaptive.isClosingStep
@@ -202,7 +236,7 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
         // Deterministic in-memory preview evaluation (no database writes, fully isolated)
         result = evaluatePreviewActivityResponse(lesson, sessionData, currentActivity, response);
       } else {
-        const res = await fetch(`/api/v1/lessons/${lesson.lessonId}/respond`, {
+        const res = await fetch(`${endpointBase}/${lesson.lessonId}/respond`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -217,10 +251,11 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
         }
 
         result = await res.json();
+        onProgress?.();
       }
 
       if (result.isSavedAndExited) {
-        router.push("/learn");
+        router.push(exitHref);
         return;
       }
 
@@ -247,10 +282,26 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
     <div className="min-h-screen bg-surface-2 flex flex-col">
       {/* Top Navigation & Status Bar */}
       <header className="bg-surface border-b border-line px-4 sm:px-8 py-4 sticky top-0 z-20">
+        {isGeneratedPreview && (
+          <div
+            data-testid="generated-preview-banner"
+            className="max-w-4xl mx-auto mb-3 px-3 py-2 rounded-xl border border-purple-500/30 bg-purple-500/10 text-purple-950 text-2xs sm:text-xs font-bold flex flex-wrap items-center gap-x-2 gap-y-1"
+          >
+            <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white font-black uppercase tracking-wider text-2xs">
+              {messages.openTopic.previewBadge}
+            </span>
+            <span className="font-medium">{messages.openTopic.previewNote}</span>
+            <span className="font-medium opacity-80" data-testid="generated-preview-sources">
+              {contentStatus && contentStatus.sources.length > 0
+                ? `${messages.openTopic.previewSources} ${contentStatus.sources.map((src) => src.title).join("; ")}`
+                : messages.openTopic.previewNoSources}
+            </span>
+          </div>
+        )}
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link
-              href="/learn"
+              href={exitHref}
               className="px-3 py-1.5 rounded-xl border border-line bg-surface-2 hover:bg-surface text-ink text-xs font-bold transition-colors flex items-center gap-1.5"
             >
               <span>←</span>
@@ -276,7 +327,7 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
                 <span>🎯</span>
                 <span>Adaptive Support</span>
               </div>
-            ) : (
+            ) : isPracticeOnly ? null : (
               <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-900 border border-amber-500/20 rounded-full text-xs font-black">
                 <span>✨</span>
                 <span>+15 Sparks</span>
@@ -358,7 +409,51 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
         )}
 
         {/* Completion Screen */}
-        {isCompleted ? (
+        {isCompleted && isPracticeOnly ? (
+          <div
+            data-testid="practice-complete"
+            className="p-8 sm:p-12 bg-surface rounded-3xl border border-line shadow-xs text-center space-y-6 animate-fade-in"
+          >
+            <h2 className="text-2xl font-extrabold text-ink">
+              {messages.openTopic.completeHeading}
+            </h2>
+            <p className="text-sm text-muted font-medium max-w-lg mx-auto">
+              {messages.openTopic.completeBody}
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push(exitHref)}
+              className="px-8 py-3.5 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors cursor-pointer"
+            >
+              Return to Curriculum
+            </button>
+          </div>
+        ) : isAwaitingNextStep && !pendingResult ? (
+          <div
+            data-testid="awaiting-next-step"
+            className="p-8 bg-surface rounded-3xl border border-line text-center space-y-4"
+          >
+            <h2 className="text-lg font-extrabold text-ink">{messages.openTopic.waitingHeading}</h2>
+            <p className="text-sm text-muted font-medium">{messages.openTopic.waitingBody}</p>
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <Link
+                href={exitHref}
+                className="px-6 py-3 bg-surface-2 hover:bg-line text-ink border border-line rounded-2xl text-sm font-bold"
+              >
+                {messages.openTopic.waitingLater}
+              </Link>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                data-testid="retry-next-step-button"
+                onClick={handleRetryNextStep}
+                className="px-6 py-3 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold cursor-pointer disabled:opacity-50"
+              >
+                {isSubmitting ? messages.openTopic.starting : messages.openTopic.waitingRetry}
+              </button>
+            </div>
+          </div>
+        ) : isCompleted ? (
           <div className="p-8 sm:p-12 bg-surface rounded-3xl border border-line shadow-xs text-center space-y-8 animate-fade-in">
             <div className="w-20 h-20 mx-auto rounded-3xl bg-teal-500/10 text-teal-600 flex items-center justify-center text-4xl shadow-inner">
               🎉
@@ -404,7 +499,7 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
             <div className="pt-4 flex flex-wrap items-center justify-center gap-4">
               <button
                 type="button"
-                onClick={() => router.push("/learn")}
+                onClick={() => router.push(exitHref)}
                 className="px-8 py-3.5 bg-primary hover:bg-primary-ink text-white rounded-2xl text-sm font-bold shadow-xs transition-colors cursor-pointer"
               >
                 Return to Curriculum
@@ -427,12 +522,13 @@ export function LessonPlayer({ initialData, isPreview = false }: LessonPlayerPro
                 : null
             }
             onContinue={handleContinue}
+            feedbackNote={isPracticeOnly ? messages.openTopic.practiceFeedback : undefined}
           />
         ) : (
           <div className="p-8 bg-surface rounded-3xl border border-line text-center space-y-4">
             <p className="text-sm font-bold text-ink">No more activities in this lesson.</p>
             <Link
-              href="/learn"
+              href={exitHref}
               className="inline-block px-6 py-2.5 bg-primary text-white font-bold rounded-xl text-xs"
             >
               Return to Learn

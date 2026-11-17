@@ -76,6 +76,7 @@ import type {
   VisualSpecDto,
 } from "@gaps/contracts";
 import { renderComebackMessage } from "../comeback";
+import { areDraftsServable } from "../runtime-policy";
 
 export class EngineError extends Error {
   readonly statusCode: number;
@@ -158,10 +159,22 @@ async function getStudentGrade(db: DbClient, studentId: string): Promise<number>
   return 6;
 }
 
+/** Non-negotiable 10: outside the draft-serving configurations only reviewed templates are used. */
+function isTemplateServable(template: Template<unknown>): boolean {
+  const { status, by, at } = template.review;
+  if (status === "retired") return false;
+  if (status === "reviewed" && Boolean(by) && Boolean(at)) return true;
+  return areDraftsServable();
+}
+
 function findTemplatesForConcept(conceptId: string): readonly Template<unknown>[] {
-  const matching = TEMPLATES.filter((t) => t.conceptId === conceptId);
-  if (matching.length === 0) {
+  const all = TEMPLATES.filter((t) => t.conceptId === conceptId);
+  if (all.length === 0) {
     throw new EngineError(`No question templates available for concept ${conceptId}`, 500);
+  }
+  const matching = all.filter(isTemplateServable);
+  if (matching.length === 0) {
+    throw new EngineError("Practice for this topic is not available yet.", 404);
   }
   return matching;
 }

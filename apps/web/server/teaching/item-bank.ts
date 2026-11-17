@@ -1,4 +1,5 @@
-import type { LessonActivity } from "@gaps/contracts";
+import type { ContentReview, LessonActivity } from "@gaps/contracts";
+import { isContentServable } from "../runtime-policy";
 
 /**
  * Authored assessment items for engine-driven lessons.
@@ -21,6 +22,33 @@ export interface BankChoice {
    */
   readonly misconception?: string;
 }
+
+/**
+ * Review state of every bank item. All items were drafted by an AI engineering
+ * agent and none has been reviewed by an educator, so none has an entry in
+ * ITEM_REVIEW_RECORDS and each falls back to the draft record below.
+ *
+ * To record a genuine review, add the item's id to ITEM_REVIEW_RECORDS with
+ * status "reviewed", the item's current version, the educator's name and the
+ * review time. Changing an item's wording or choices invalidates its review:
+ * bump the version and return it to "draft".
+ */
+export const ITEM_DRAFT_REVIEW: ContentReview = {
+  status: "draft",
+  version: 1,
+  authoredBy: "ai-drafted:clau",
+  notes: "Awaiting educator review of wording, correct answer and misconception tags.",
+};
+
+export const ITEM_REVIEW_RECORDS: Readonly<Record<string, ContentReview>> = {};
+
+export function getItemReview(itemId: string): ContentReview {
+  return ITEM_REVIEW_RECORDS[itemId] ?? ITEM_DRAFT_REVIEW;
+}
+
+export type ServablePredicate = (review: ContentReview | undefined) => boolean;
+
+const defaultServable: ServablePredicate = (review) => isContentServable(review);
 
 export interface BankItem {
   readonly itemId: string;
@@ -501,22 +529,42 @@ export function hasItemBank(objectiveId: string): boolean {
 export function selectAssessmentItem(
   objectiveId: string,
   excludedItemIds: readonly string[] = [],
+  servable: ServablePredicate = defaultServable,
 ): BankItem | undefined {
   const excluded = new Set(excludedItemIds);
-  return getBankItems(objectiveId).find((i) => i.kind === "assessment" && !excluded.has(i.itemId));
+  return getBankItems(objectiveId).find(
+    (i) => i.kind === "assessment" && !excluded.has(i.itemId) && servable(getItemReview(i.itemId)),
+  );
 }
 
 export function countRemainingAssessmentItems(
   objectiveId: string,
   excludedItemIds: readonly string[] = [],
+  servable: ServablePredicate = defaultServable,
 ): number {
   const excluded = new Set(excludedItemIds);
-  return getBankItems(objectiveId).filter((i) => i.kind === "assessment" && !excluded.has(i.itemId))
-    .length;
+  return getBankItems(objectiveId).filter(
+    (i) => i.kind === "assessment" && !excluded.has(i.itemId) && servable(getItemReview(i.itemId)),
+  ).length;
 }
 
-export function selectDiagnosticItem(objectiveId: string): BankItem | undefined {
-  return getBankItems(objectiveId).find((i) => i.kind === "diagnostic");
+export function selectDiagnosticItem(
+  objectiveId: string,
+  servable: ServablePredicate = defaultServable,
+): BankItem | undefined {
+  return getBankItems(objectiveId).find(
+    (i) => i.kind === "diagnostic" && servable(getItemReview(i.itemId)),
+  );
+}
+
+/** Assessment items that may be served here, in authored order. */
+export function getServableAssessmentItems(
+  objectiveId: string,
+  servable: ServablePredicate = defaultServable,
+): BankItem[] {
+  return getBankItems(objectiveId).filter(
+    (i) => i.kind === "assessment" && servable(getItemReview(i.itemId)),
+  );
 }
 
 export interface GradedChoice {
